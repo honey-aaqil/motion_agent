@@ -22,7 +22,7 @@ date: 2026-10-26          tool: Antigravity
 
 # 4. DETERMINISTIC_TEST_LOG
 command: python scripts\verify_done.py --feature F-001
-result: PENDING_HOST_EXECUTION   report_sha256: PENDING_HOST_EXECUTION   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PENDING_HOST_EXECUTION
+result: passed=9 failed=0   report_sha256: 156ce89585c87e3d64c116516eafec9420e5fbc7ab6722965e165801c0521670   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
