@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-001            stage: REVIEW
+task_id: F-002            stage: REVIEW
 date: 2026-10-26          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,17 +12,13 @@ date: 2026-10-26          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `CONSTRAINTS.md`, `AGENTS.md`, `feature_list.json`, `.gitattributes`, `.env.example`
-- `DECISIONS.md`, `SPIKES.md`, `PHASE_LOG.md`, `TOOLS_LICENSES.md`
-- `src\pipeline.py`: `durable_replace()` (MoveFileExW atomic write-through) and `run_pipeline()`
-- `scripts\verify_done.py`: 6-step verifier (`--baseline`, `--pre-commit`, `--feature`, `--audit-week`) with built-in CTRF JSON generator, protected-file diff check, 5-file/250-line budget check, AST reachability check, and return-None mutation check
-- `.git\hooks\pre-commit`: invokes `python scripts/verify_done.py --pre-commit`
-- `tests\immutable\test_immutable_sample.py`: held-out governance and bad-input check
-- `tests\regression\test_f001_governance.py`: 5 sabotage checks (failing earlier test, edited protected file, 6-file diff, uncalled function in `src\`, read-only lock write rejection)
+- `scripts\check_env.ps1`: environment check script covering Node, git, ffmpeg/ffprobe, Python via py, Playwright chromium-headless-shell, whisper-cli + model, SQLite >= 3.51.3, RAM/disk, power plan, page file, Defender exclusion
+- `src\pipeline.py`: `validate_environment()` checking required keys and SQLite >= 3.51.3, wired to `run_pipeline()`
+- `tests\regression\test_f002_env.py`: 7 regression tests verifying type checks, missing keys, SQLite version rejection, valid report structured output, wiring into `run_pipeline()`, and `check_env.ps1` execution in `-JsonOut` and human modes
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-001
-result: passed=9 failed=0   report_sha256: 156ce89585c87e3d64c116516eafec9420e5fbc7ab6722965e165801c0521670   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-002
+result: passed=16 failed=0   report_sha256: c1446444ea8a87e45ee09fc6bb5708e19f7ca3eb3849b909344692e0e6a45950   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -34,7 +30,6 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Phase P0a (F-002): implement `scripts\check_env.ps1` to verify Node, git,
-  ffmpeg/ffprobe, Python via `py`, Playwright `chromium-headless-shell`,
-  `whisper-cli.exe`, SQLite >= 3.51.3, free RAM/disk, power plan, page file,
-  and Defender exclusion for `C:\motion-agent`.
+  Start Phase P0 (F-003): Spikes: render memory in openfilm, whisper latency on EN/HI/TA,
+  rembg on 10 images, DOM gate defect injection, Gemini diagnostics/quota/load test,
+  and UTF-8 round trip through SQLite/HTTP/PowerShell.
