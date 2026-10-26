@@ -1,0 +1,217 @@
+{
+  "schema": 1,
+  "rule": "Only scripts/verify_done.py may change status to PASS and set evidence_path.",
+  "features": [
+    {
+      "id": "F-001",
+      "phase": "P-1",
+      "title": "Repo guards and verify_done",
+      "spec": [
+        "0",
+        "15"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-002",
+      "phase": "P0a",
+      "title": "Environment check script",
+      "spec": [
+        "2",
+        "12"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-003",
+      "phase": "P0",
+      "title": "Spikes: render memory, whisper, rembg, UTF-8",
+      "spec": [
+        "12",
+        "3"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-004",
+      "phase": "P0",
+      "title": "Gemini diagnostics, quota, 503 load test",
+      "spec": [
+        "6"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-005",
+      "phase": "P1",
+      "title": "SQLite schema, state machine, leases",
+      "spec": [
+        "5",
+        "12"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-006",
+      "phase": "P1",
+      "title": "Rate governor and gateway",
+      "spec": [
+        "6"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-007",
+      "phase": "P1",
+      "title": "Mock Gemini chaos server",
+      "spec": [
+        "6",
+        "17"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-008",
+      "phase": "P2",
+      "title": "Deterministic renderer and chunking",
+      "spec": [
+        "12"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-009",
+      "phase": "P2",
+      "title": "Render canaries INV-1..6 with sabotage fixtures",
+      "spec": [
+        "7"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-010",
+      "phase": "P3",
+      "title": "Templates, canonicalizer, validator, DOM gate",
+      "spec": [
+        "7",
+        "8"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-011",
+      "phase": "P4",
+      "title": "Parser, VO round trip, Audio Pack",
+      "spec": [
+        "9",
+        "16"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-012",
+      "phase": "P5",
+      "title": "Assets, ledger, license filter",
+      "spec": [
+        "10"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-013",
+      "phase": "P6",
+      "title": "Timing and sentence anchors",
+      "spec": [
+        "3"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-014",
+      "phase": "P7",
+      "title": "StoryBible, Scene Author, repair/restart routing",
+      "spec": [
+        "5",
+        "6"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-015",
+      "phase": "P8",
+      "title": "Evaluation harness and gates",
+      "spec": [
+        "13"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-016",
+      "phase": "P9",
+      "title": "Dashboard, watchdog, auto-start",
+      "spec": [
+        "11",
+        "12"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-017",
+      "phase": "P10",
+      "title": "Editor, overrides, editor_events",
+      "spec": [
+        "11"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-018",
+      "phase": "P11",
+      "title": "Visual critic (shadow) and low-quota mode",
+      "spec": [
+        "5.1",
+        "6"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-019",
+      "phase": "P12",
+      "title": "Packaging and 6-hour soak",
+      "spec": [
+        "16",
+        "17"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    },
+    {
+      "id": "F-020",
+      "phase": "P13",
+      "title": "Improvement program (rules, exemplar bank)",
+      "spec": [
+        "14"
+      ],
+      "status": "FAIL",
+      "evidence_path": null
+    }
+  ]
+}
