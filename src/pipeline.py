@@ -12,6 +12,12 @@ from typing import Any
 MOVEFILE_REPLACE_EXISTING = 0x1
 MOVEFILE_WRITE_THROUGH = 0x8
 
+REQUIRED_ENV_KEYS: tuple[str, ...] = (
+    "node", "git", "ffmpeg", "ffprobe", "python", "playwright",
+    "whisper", "sqlite", "ram", "disk", "power_plan", "page_file", "defender_exclusion",
+)
+MIN_SQLITE_VERSION: tuple[int, int, int] = (3, 51, 3)
+
 if os.name == "nt":
     _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _k32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
@@ -44,6 +50,36 @@ def durable_replace(tmp_path: str | Path, dst_path: str | Path, timeout: float =
             return dst
 
 
+def _parse_version_tuple(v: str) -> tuple[int, ...]:
+    cleaned = "".join(ch if (ch.isdigit() or ch == ".") else " " for ch in v).strip()
+    parts = [int(p) for p in cleaned.split() if p.isdigit()]
+    if not parts and "." in v:
+        parts = [int(p) for p in v.split(".") if p.isdigit()]
+    return tuple(parts[:3])
+
+
+def validate_environment(env_report: dict[str, Any]) -> dict[str, Any]:
+    """Validate environment status report against P0a requirements."""
+    if not isinstance(env_report, dict):
+        raise TypeError("env_report must be a dict")
+    for key in REQUIRED_ENV_KEYS:
+        if key not in env_report:
+            raise ValueError(f"Missing required environment check key: {key}")
+
+    sqlite_entry = env_report["sqlite"]
+    v_str = str(sqlite_entry.get("version", "")) if isinstance(sqlite_entry, dict) else str(sqlite_entry)
+    v_tuple = _parse_version_tuple(v_str)
+    if v_tuple < MIN_SQLITE_VERSION:
+        raise RuntimeError(f"SQLite version {v_str} is below required 3.51.3")
+
+    todo: list[str] = []
+    for k, item in env_report.items():
+        if isinstance(item, dict) and item.get("status") in ("FAIL", "WARN"):
+            todo.append(f"{k}: {item.get('note') or item.get('status')}")
+
+    return {"valid": len(todo) == 0, "checks": env_report, "todo": todo}
+
+
 def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     """Validate project payload and execute an atomic state heartbeat write."""
     if not isinstance(project_root, Path):
@@ -54,6 +90,10 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     project_id = str(payload["project_id"]).strip()
     if not project_id:
         raise ValueError("project_id cannot be whitespace")
+
+    env_result: dict[str, Any] | None = None
+    if "env_report" in payload:
+        env_result = validate_environment(payload["env_report"])
 
     work_dir = project_root / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -67,8 +107,11 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         os.fsync(fh.fileno())
 
     final_path = durable_replace(tmp_file, dst_file)
-    return {
+    ret: dict[str, Any] = {
         "project_id": project_id,
         "stage": "VIDEO_NEW",
         "state_file": str(final_path),
     }
+    if env_result is not None:
+        ret["env"] = env_result
+    return ret
