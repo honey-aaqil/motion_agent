@@ -4,96 +4,116 @@
       "name": "pytest-ctrf-builtin"
     },
     "summary": {
-      "tests": 16,
-      "passed": 16,
+      "tests": 20,
+      "passed": 20,
       "failed": 0,
       "skipped": 0,
       "pending": 0,
       "other": 0,
-      "start": 1793089906724,
-      "stop": 1793089926785,
+      "start": 1793092321918,
+      "stop": 1793092339843,
       "exit_code": 0
     },
     "tests": [
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_invalid_input_raises",
         "status": "passed",
-        "duration": 1.335
+        "duration": 0.569
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_valid_and_durable_replace",
         "status": "passed",
-        "duration": 13.136
+        "duration": 12.917
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_failing_earlier_test_rejected",
         "status": "passed",
-        "duration": 3750.974
+        "duration": 3634.225
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_edited_protected_file_rejected",
         "status": "passed",
-        "duration": 3216.847
+        "duration": 2966.506
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_six_file_diff_rejected",
         "status": "passed",
-        "duration": 3724.023
+        "duration": 3304.96
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_uncalled_function_rejected",
         "status": "passed",
-        "duration": 3636.029
+        "duration": 3116.338
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_readonly_lock_blocks_edit",
         "status": "passed",
-        "duration": 3.04
+        "duration": 2.762
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_type_error",
         "status": "passed",
-        "duration": 0.559
+        "duration": 0.354
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_missing_keys",
         "status": "passed",
-        "duration": 0.321
+        "duration": 0.258
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_sqlite_too_old",
         "status": "passed",
-        "duration": 0.37
+        "duration": 0.285
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_valid_report",
         "status": "passed",
-        "duration": 0.171
+        "duration": 0.148
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_wired_in_run_pipeline",
         "status": "passed",
-        "duration": 9.102
+        "duration": 22.366
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_json_output",
         "status": "passed",
-        "duration": 2049.5
+        "duration": 2038.628
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_human_output_and_todo",
         "status": "passed",
-        "duration": 2096.431
+        "duration": 1991.679
+      },
+      {
+        "name": "tests/regression/test_f003_spikes.py::test_audio_filename_validation",
+        "status": "passed",
+        "duration": 0.417
+      },
+      {
+        "name": "tests/regression/test_f003_spikes.py::test_vo_text_normalization_and_split",
+        "status": "passed",
+        "duration": 0.361
+      },
+      {
+        "name": "tests/regression/test_f003_spikes.py::test_duration_and_utf8_roundtrip",
+        "status": "passed",
+        "duration": 43.214
+      },
+      {
+        "name": "tests/regression/test_f003_spikes.py::test_memory_and_pipeline_wiring",
+        "status": "passed",
+        "duration": 45.4
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_governance_files_present_and_bounded",
         "status": "passed",
-        "duration": 1.026
+        "duration": 0.646
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_pipeline_rejects_bad_input",
         "status": "passed",
-        "duration": 8.688
+        "duration": 6.507
       }
     ]
   }

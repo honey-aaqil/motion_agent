@@ -5,3 +5,5 @@ __pycache__/
 .env
 reports/*.tmp
 work/
+builder-kit-v1.md
+motion-agent-build-prompt-v1.md
