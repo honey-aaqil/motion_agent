@@ -75,3 +75,23 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-005
 29 passed in 40.12s
 [PASS Feature F-005] Feature F-005 set to PASS (sha256=307c645d2dad2a8e3802abc4cb13259e039a93535f1f076a7a9fe954df6bda6d).
 ```
+
+## Phase P1: Rate Governor & Gateway (F-006)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-006
+.................................                                        [100%]
+33 passed in 23.29s
+.................................                                        [100%]
+33 passed in 23.15s
+[PASS Feature F-006] Feature F-006 set to PASS (sha256=1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0).
+```
+
+## Phase P1: Rate Governor & Gateway (F-006)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-006
+.................................                                        [100%]
+33 passed in 21.77s
+.................................                                        [100%]
+33 passed in 20.45s
+[PASS Feature F-006] Feature F-006 set to PASS (sha256=1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0).
+```

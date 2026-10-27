@@ -63,8 +63,8 @@
       "spec": [
         "6"
       ],
-      "status": "FAIL",
-      "evidence_path": null
+      "status": "PASS",
+      "evidence_path": "reports/ctrf_latest.json#sha256=1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0"
     },
     {
       "id": "F-007",

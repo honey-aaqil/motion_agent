@@ -10,175 +10,175 @@
       "skipped": 0,
       "pending": 0,
       "other": 0,
-      "start": 1793112097544,
-      "stop": 1793112118143,
+      "start": 1793112226728,
+      "stop": 1793112253477,
       "exit_code": 0
     },
     "tests": [
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_invalid_input_raises",
         "status": "passed",
-        "duration": 0.575
+        "duration": 1.337
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_valid_and_durable_replace",
         "status": "passed",
-        "duration": 7.385
+        "duration": 7.877
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_failing_earlier_test_rejected",
         "status": "passed",
-        "duration": 4132.171
+        "duration": 4316.064
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_edited_protected_file_rejected",
         "status": "passed",
-        "duration": 3163.508
+        "duration": 4196.174
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_six_file_diff_rejected",
         "status": "passed",
-        "duration": 3979.466
+        "duration": 4811.9
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_uncalled_function_rejected",
         "status": "passed",
-        "duration": 4405.655
+        "duration": 6036.78
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_readonly_lock_blocks_edit",
         "status": "passed",
-        "duration": 3.149
+        "duration": 2.883
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_type_error",
         "status": "passed",
-        "duration": 0.265
+        "duration": 0.456
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_missing_keys",
         "status": "passed",
-        "duration": 0.179
+        "duration": 0.44
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_sqlite_too_old",
         "status": "passed",
-        "duration": 0.208
+        "duration": 0.793
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_valid_report",
         "status": "passed",
-        "duration": 0.149
+        "duration": 0.547
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_wired_in_run_pipeline",
         "status": "passed",
-        "duration": 2.915
+        "duration": 4.671
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_json_output",
         "status": "passed",
-        "duration": 2311.208
+        "duration": 3108.824
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_human_output_and_todo",
         "status": "passed",
-        "duration": 2086.953
+        "duration": 2720.346
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_audio_filename_validation",
         "status": "passed",
-        "duration": 0.323
+        "duration": 0.635
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_vo_text_normalization_and_split",
         "status": "passed",
-        "duration": 0.588
+        "duration": 0.494
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_duration_and_utf8_roundtrip",
         "status": "passed",
-        "duration": 24.863
+        "duration": 32.296
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_memory_and_pipeline_wiring",
         "status": "passed",
-        "duration": 34.897
+        "duration": 52.718
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_gemini_config_validation_and_rejections",
         "status": "passed",
-        "duration": 0.2
+        "duration": 0.42
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_backoff_jitter_and_rejections",
         "status": "passed",
-        "duration": 0.178
+        "duration": 0.307
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_gemini_status_classification_and_rejections",
         "status": "passed",
-        "duration": 0.197
+        "duration": 0.303
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_load_simulation_and_pipeline_wiring",
         "status": "passed",
-        "duration": 3.195
+        "duration": 4.884
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_init_database_and_schema_pragmas",
         "status": "passed",
-        "duration": 12.683
+        "duration": 22.409
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_scene_state_transitions_and_rejections",
         "status": "passed",
-        "duration": 16.436
+        "duration": 27.195
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_lease_lifecycle_and_reclaim",
         "status": "passed",
-        "duration": 16.048
+        "duration": 29.888
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_error_routing_and_rejections",
         "status": "passed",
-        "duration": 0.193
+        "duration": 0.507
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_pipeline_wiring_state_machine",
         "status": "passed",
-        "duration": 20.507
+        "duration": 29.565
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_rate_governor_interval_and_daily_cap",
         "status": "passed",
-        "duration": 16.128
+        "duration": 24.52
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_gateway_queue_priority_and_idempotency",
         "status": "passed",
-        "duration": 17.177
+        "duration": 30.906
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_model_version_assertion_and_logging",
         "status": "passed",
-        "duration": 13.033
+        "duration": 25.075
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_pipeline_wiring_gateway",
         "status": "passed",
-        "duration": 19.695
+        "duration": 32.751
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_governance_files_present_and_bounded",
         "status": "passed",
-        "duration": 0.807
+        "duration": 1.092
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_pipeline_rejects_bad_input",
         "status": "passed",
-        "duration": 3.222
+        "duration": 4.923
       }
     ]
   }
