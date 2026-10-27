@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-007            stage: REVIEW
+task_id: F-008            stage: REVIEW
 date: 2026-10-27          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-10-27          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Mock Gemini chaos server (`start_gemini_chaos_server`, `stop_gemini_chaos_server`, `_GeminiChaosHandler`) supporting 503 storm, 429 minute & day, truncated JSON, empty 200, slow response, and wrong model version; `compute_llm_backoff` with exponential backoff & full jitter; `call_gemini_gateway` with chaos mode headers, HTTP error handling, timeout / network error handling, `api_rate_ledger` tracking (503 does not increment call count), and pipeline wiring via `run_pipeline`
-- `tests\regression\test_f007_chaos_server.py`: Regression tests covering backoff math and jitter bounds, chaos server bad inputs, all chaos modes, ledger non-increment on 503, clock-mocked full-state-machine replay (200, 503, 503, 429, midnight reset, crash, lease expiry, 200), and pipeline wiring
-- `PHASE_LOG.md`: Phase P1 (F-007) terminal output recorded
+- `src\pipeline.py`: Deterministic renderer and chunking helpers (`compute_render_chunks`, `get_chromium_render_flags`, `check_render_resource_watchdog`, `adjust_chunk_size_on_respawns`, `clean_stray_processes`, `build_ffmpeg_encode_cmd`, `build_ffmpeg_concat_cmd`, `build_ffmpeg_mix_cmd`, `render_scene_chunk`) enforcing <= 900 frame chunking, 10 GB disk floor, 2.8 GB process tree / 1.2 GB RAM watchdog, consecutive respawn fallback to 300 frames, ffmpeg encoding with libx264 yuv420p 30 fps CRF 18-20 +faststart and 2 threads, and pipeline wiring via `run_pipeline`
+- `tests\regression\test_f008_renderer.py`: Regression tests covering chunk splitting and input rejection, Chromium flags, memory & disk watchdog thresholds, respawn adaptation, ffmpeg encode/concat/mix commands, process cleanup, chunk rendering, and pipeline wiring
+- `PHASE_LOG.md`: Phase P2 (F-008) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-007
-result: passed=37 failed=0   report_sha256: 58ad5115ca0296742db832440e3081590f6ff93705889928ff88226bdcc6a8cf   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-008
+result: passed=41 failed=0   report_sha256: bd89f696dc53028d05b7d8d3eda42d4ba2279bde62ca89eb1e9304b5ff1a1efe   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-008 (Phase P2): Deterministic renderer and chunking (SPEC Section 12).
+  Start Feature F-009 (Phase P2): Render canaries INV-1..6 with sabotage fixtures (SPEC Section 7).

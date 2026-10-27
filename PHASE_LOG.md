@@ -93,3 +93,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-007
 37 passed in 21.52s
 [PASS Baseline] passed=37 failed=0 | Protected files intact. | sha256=58ad5115ca0296742db832440e3081590f6ff93705889928ff88226bdcc6a8cf
 ```
+
+## Phase P2: Deterministic Renderer and Chunking (F-008)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-008
+.........................................                                [100%]
+41 passed in 19.58s
+.........................................                                [100%]
+41 passed in 18.00s
+[PASS Feature F-008] Feature F-008 set to PASS (sha256=bd89f696dc53028d05b7d8d3eda42d4ba2279bde62ca89eb1e9304b5ff1a1efe).
+```
