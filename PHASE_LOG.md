@@ -45,3 +45,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-002
 16 passed in 18.74s
 [PASS Feature F-002] Feature F-002 set to PASS (sha256=c1446444ea8a87e45ee09fc6bb5708e19f7ca3eb3849b909344692e0e6a45950).
 ```
+
+## Phase P0: Spikes (F-003)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-003
+....................                                                     [100%]
+20 passed in 18.03s
+....................                                                     [100%]
+20 passed in 18.23s
+[PASS Feature F-003] Feature F-003 set to PASS (sha256=189c02d5597e8e60b05008fe99deb4fa3fe336e8aeed8df4b7a34377a07d903c).
+```
