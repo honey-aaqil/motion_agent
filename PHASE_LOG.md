@@ -65,3 +65,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-004
 24 passed in 16.88s
 [PASS Feature F-004] Feature F-004 set to PASS (sha256=c176bdc97f8cf52a022cdc5dfcacc2605536e59c683b9d9489e011223cf1f655).
 ```
+
+## Phase P1: SQLite Schema, State Machine & Leases (F-005)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-005
+.............................                                            [100%]
+29 passed in 16.45s
+.............................                                            [100%]
+29 passed in 40.12s
+[PASS Feature F-005] Feature F-005 set to PASS (sha256=307c645d2dad2a8e3802abc4cb13259e039a93535f1f076a7a9fe954df6bda6d).
+```

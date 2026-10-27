@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-004            stage: REVIEW
+task_id: F-005            stage: REVIEW
 date: 2026-10-27          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,14 +12,13 @@ date: 2026-10-27          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Gemini diagnostics, configuration validation, backoff with full jitter calculation, status classification, and 503 load simulation helpers wired to `run_pipeline`
-- `tests\regression\test_f004_gemini.py`: Regression tests verifying bad config rejections, jitter backoff bounds, status code classification (200, 503, 500, 429, 400, 404), fallback switching, queue pause, 30-request 503 load simulation, and pipeline wiring
-- `SPIKES.md`: SP-06 empirical spike verified
-- `PHASE_LOG.md`: Phase P0 (F-004) terminal output recorded
+- `src\pipeline.py`: SQLite initialization with WAL mode & pragmas, table schemas (`projects`, `scenes`, `scene_attempts`, `api_rate_ledger`, `editor_events`), state transition machine with `MAX_LLM_CALLS_PER_SCENE = 2`, heartbeat leases with 90s expiry & reclaim, and error routing classifier (`LOCAL_REPAIR` vs `GLOBAL_RESTART` vs `NEEDS_HUMAN_EDIT`), all wired to `run_pipeline`
+- `tests\regression\test_f005_state_machine.py`: Regression tests covering database schema & WAL pragmas, state transition validation & illegal rejection, lease acquisition/renewal/reclaim, and error routing classification
+- `PHASE_LOG.md`: Phase P1 (F-005) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-004
-result: passed=24 failed=0   report_sha256: c176bdc97f8cf52a022cdc5dfcacc2605536e59c683b9d9489e011223cf1f655   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-005
+result: passed=29 failed=0   report_sha256: 307c645d2dad2a8e3802abc4cb13259e039a93535f1f076a7a9fe954df6bda6d   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -31,4 +30,5 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-005 (Phase P1): SQLite schema, state machine, leases (SPEC Section 5 and 12).
+  Start Feature F-006 (Phase P1): Rate governor and gateway (SPEC Section 6).
+
