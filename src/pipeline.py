@@ -1,7 +1,7 @@
 """Core pipeline entrypoint, NTFS crash-safe file replacement, and P0 spikes."""
 from __future__ import annotations
 
-import ctypes, os, re, sqlite3, time, unicodedata
+import ctypes, hashlib, os, re, sqlite3, time, unicodedata
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -230,6 +230,8 @@ def init_database(db_path: Path | str) -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS scene_attempts (attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, project_id TEXT NOT NULL, attempt_num INTEGER NOT NULL, prompt_hash TEXT NOT NULL, raw_response TEXT, canonical_spec TEXT, validation_metrics TEXT, dom_metrics TEXT, latency_ms REAL, thoughts_tokens INTEGER, output_tokens INTEGER, created_at REAL NOT NULL, FOREIGN KEY(scene_id) REFERENCES scenes(scene_id));
         CREATE TABLE IF NOT EXISTS api_rate_ledger (call_id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, model_id TEXT, status_code INTEGER, created_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS editor_events (event_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, action_type TEXT NOT NULL, pre_edit_validator_warn INTEGER DEFAULT 0, pre_edit_cv_warn INTEGER DEFAULT 0, token_levenshtein_pct REAL DEFAULT 0.0, anchor_unchanged INTEGER DEFAULT 1, is_clean_quality_pair INTEGER DEFAULT 0, created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS llm_queue (request_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt_hash TEXT NOT NULL, prompt_text TEXT NOT NULL, task TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'PENDING', response_text TEXT, error TEXT, created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS llm_log (log_id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, model_id TEXT NOT NULL, task TEXT NOT NULL, status_code INTEGER NOT NULL, latency_ms REAL NOT NULL, attempt INTEGER NOT NULL, error_code TEXT, created_at REAL NOT NULL);
     """)
     return conn
 
@@ -307,6 +309,118 @@ def classify_error_routing(faults: list[dict[str, Any]], calls_used: int) -> dic
             distinct_elements.add(str(f["element_id"]))
     return {"route": "GLOBAL_RESTART" if (len(distinct_elements) >= 3 or is_global) else "LOCAL_REPAIR", "reason": "routing_decision"}
 
+def record_api_call(conn: sqlite3.Connection, project_id: str, model_id: str, status_code: int, created_at: float | None = None) -> int:
+    if not isinstance(project_id, str) or not isinstance(model_id, str):
+        raise TypeError("project_id and model_id must be strings")
+    if not project_id.strip() or not model_id.strip():
+        raise ValueError("project_id and model_id cannot be empty")
+    if not isinstance(status_code, int) or isinstance(status_code, bool) or not (100 <= status_code <= 599):
+        raise ValueError(f"Invalid status_code: {status_code}")
+    t = time.time() if created_at is None else float(created_at)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO api_rate_ledger (project_id, model_id, status_code, created_at) VALUES (?, ?, ?, ?);", (project_id, model_id, status_code, t))
+    conn.commit()
+    return int(cur.lastrowid)
+
+def check_rate_governor(conn: sqlite3.Connection, now_monotonic: float, last_call_monotonic: float, now_wall: float | None = None, daily_quota_cap: int | None = None, min_interval_sec: float = 15.5) -> dict[str, Any]:
+    if not isinstance(now_monotonic, (int, float)) or not isinstance(last_call_monotonic, (int, float)):
+        raise TypeError("monotonic timestamps must be numeric")
+    if now_monotonic < last_call_monotonic:
+        raise ValueError("now_monotonic cannot be earlier than last_call_monotonic")
+    interval = float(now_monotonic - last_call_monotonic)
+    if interval < min_interval_sec:
+        return {"allowed": False, "action": "wait_rate_limit", "wait_sec": round(min_interval_sec - interval, 3)}
+    t_wall = time.time() if now_wall is None else float(now_wall)
+    cur = conn.cursor()
+    if daily_quota_cap is not None:
+        cur.execute("SELECT COUNT(*) FROM api_rate_ledger WHERE created_at >= ?;", (t_wall - 86400.0,))
+        row = cur.fetchone()
+        if row and int(row[0]) >= int(daily_quota_cap):
+            return {"allowed": False, "action": "QUOTA_SLEEP_UNTIL_RESET", "wait_sec": 86400.0}
+    cur.execute("SELECT COUNT(*) FROM api_rate_ledger WHERE created_at >= ?;", (t_wall - 60.0,))
+    r60 = cur.fetchone()
+    if r60 and int(r60[0]) >= 4:
+        return {"allowed": False, "action": "wait_rate_limit", "wait_sec": 62.0}
+    return {"allowed": True, "action": "proceed", "wait_sec": 0.0}
+
+def enqueue_llm_request(conn: sqlite3.Connection, project_id: str, prompt: str, task: str = "scene_author", priority: int = 1, now: float | None = None) -> str:
+    if not isinstance(project_id, str) or not isinstance(prompt, str):
+        raise TypeError("project_id and prompt must be strings")
+    p_clean = prompt.strip()
+    if not p_clean or not project_id.strip():
+        raise ValueError("project_id and prompt cannot be empty")
+    t = time.time() if now is None else float(now)
+    p_hash = hashlib.sha256(p_clean.encode("utf-8")).hexdigest()
+    cur = conn.cursor()
+    cur.execute("SELECT request_id FROM llm_queue WHERE project_id = ? AND prompt_hash = ? AND status != 'FAILED' LIMIT 1;", (project_id, p_hash))
+    row = cur.fetchone()
+    if row:
+        return str(row[0])
+    req_id = f"req_{p_hash[:12]}_{int(t * 1000)}"
+    cur.execute("INSERT INTO llm_queue (request_id, project_id, prompt_hash, prompt_text, task, priority, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?);",
+                (req_id, project_id, p_hash, p_clean, task, int(priority), t))
+    conn.commit()
+    return req_id
+
+def pop_next_llm_request(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    cur = conn.cursor()
+    cur.execute("SELECT request_id, project_id, prompt_hash, prompt_text, task, priority FROM llm_queue WHERE status = 'PENDING' ORDER BY priority DESC, created_at ASC LIMIT 1;")
+    row = cur.fetchone()
+    if not row:
+        return None
+    req_id = str(row[0])
+    cur.execute("UPDATE llm_queue SET status = 'IN_FLIGHT' WHERE request_id = ?;", (req_id,))
+    conn.commit()
+    return {"request_id": req_id, "project_id": str(row[1]), "prompt_hash": str(row[2]), "prompt_text": str(row[3]), "task": str(row[4]), "priority": int(row[5])}
+
+def complete_llm_request(conn: sqlite3.Connection, request_id: str, response_text: str) -> bool:
+    if not isinstance(request_id, str) or not isinstance(response_text, str):
+        raise TypeError("request_id and response_text must be strings")
+    cur = conn.cursor()
+    cur.execute("UPDATE llm_queue SET status = 'COMPLETED', response_text = ? WHERE request_id = ?;", (response_text, request_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+def fail_llm_request(conn: sqlite3.Connection, request_id: str, error: str) -> bool:
+    if not isinstance(request_id, str) or not isinstance(error, str):
+        raise TypeError("request_id and error must be strings")
+    cur = conn.cursor()
+    cur.execute("UPDATE llm_queue SET status = 'FAILED', error = ? WHERE request_id = ?;", (error, request_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+def assert_model_version(actual_version: str, expected_model_id: str) -> bool:
+    if not isinstance(actual_version, str) or not isinstance(expected_model_id, str):
+        raise TypeError("model versions must be strings")
+    if not actual_version.strip() or not expected_model_id.strip():
+        raise ValueError("model versions cannot be empty")
+    if actual_version.strip().lower() != expected_model_id.strip().lower():
+        raise ValueError(f"Model version mismatch: expected {expected_model_id!r}, got {actual_version!r}")
+    return True
+
+def log_llm_call(conn: sqlite3.Connection, project_id: str, model_id: str, task: str, status_code: int, latency_ms: float, attempt: int, error_code: str | None = None, created_at: float | None = None) -> int:
+    if not isinstance(project_id, str) or not isinstance(model_id, str) or not isinstance(task, str):
+        raise TypeError("project_id, model_id and task must be strings")
+    if not isinstance(latency_ms, (int, float)) or latency_ms < 0:
+        raise ValueError("latency_ms must be non-negative")
+    if not isinstance(attempt, int) or attempt < 0:
+        raise ValueError("attempt must be non-negative int")
+    t = time.time() if created_at is None else float(created_at)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO llm_log (project_id, model_id, task, status_code, latency_ms, attempt, error_code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+                (project_id, model_id, task, int(status_code), float(latency_ms), attempt, error_code, t))
+    conn.commit()
+    return int(cur.lastrowid)
+
+def format_llm_status_display(status: str, retry_num: int = 0, next_try_sec: float = 0.0) -> str:
+    if not isinstance(status, str):
+        raise TypeError("status must be a string")
+    if retry_num < 0 or next_try_sec < 0:
+        raise ValueError("retry_num and next_try_sec must be non-negative")
+    if status == "waiting_llm":
+        return f"waiting for LLM (retry {retry_num}, next try in {next_try_sec:.1f} s)"
+    return f"LLM status: {status}"
+
 def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(project_root, Path):
         raise TypeError("project_root must be a pathlib.Path instance")
@@ -357,6 +471,25 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         finally:
             conn.close()
 
+    gw_result = None
+    if payload.get("run_gateway"):
+        conn = init_database(work_dir / f"{project_id}.db")
+        try:
+            now_ts = time.time()
+            record_api_call(conn, project_id, "gemini-2.5-flash", 200, created_at=now_ts)
+            check_rate_governor(conn, now_monotonic=20.0, last_call_monotonic=0.0, now_wall=now_ts, daily_quota_cap=20)
+            rid = enqueue_llm_request(conn, project_id, "test prompt", task="scene_author", priority=1, now=now_ts)
+            popped = pop_next_llm_request(conn)
+            if popped:
+                complete_llm_request(conn, popped["request_id"], '{"status": "ok"}')
+                fail_llm_request(conn, popped["request_id"], "none")
+            log_llm_call(conn, project_id, "gemini-2.5-flash", "scene_author", 200, 50.0, 1, created_at=now_ts)
+            assert_model_version("gemini-2.5-flash", "gemini-2.5-flash")
+            format_llm_status_display("waiting_llm", retry_num=1, next_try_sec=15.5)
+            gw_result = {"status": "READY", "request_id": rid}
+        finally:
+            conn.close()
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -373,4 +506,6 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["gemini"] = gemini_result
     if sm_result is not None:
         ret["state_machine"] = sm_result
+    if gw_result is not None:
+        ret["gateway"] = gw_result
     return ret
