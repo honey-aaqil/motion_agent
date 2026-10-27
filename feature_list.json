@@ -74,8 +74,8 @@
         "6",
         "17"
       ],
-      "status": "FAIL",
-      "evidence_path": null
+      "status": "PASS",
+      "evidence_path": "reports/ctrf_latest.json#sha256=58ad5115ca0296742db832440e3081590f6ff93705889928ff88226bdcc6a8cf"
     },
     {
       "id": "F-008",

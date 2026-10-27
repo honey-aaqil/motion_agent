@@ -86,12 +86,10 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-006
 [PASS Feature F-006] Feature F-006 set to PASS (sha256=1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0).
 ```
 
-## Phase P1: Rate Governor & Gateway (F-006)
+## Phase P1: Mock Gemini Chaos Server (F-007)
 ```
-PS C:\motion-agent> python scripts\verify_done.py --feature F-006
-.................................                                        [100%]
-33 passed in 21.77s
-.................................                                        [100%]
-33 passed in 20.45s
-[PASS Feature F-006] Feature F-006 set to PASS (sha256=1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0).
+PS C:\motion-agent> python scripts\verify_done.py --feature F-007
+.....................................                                    [100%]
+37 passed in 21.52s
+[PASS Baseline] passed=37 failed=0 | Protected files intact. | sha256=58ad5115ca0296742db832440e3081590f6ff93705889928ff88226bdcc6a8cf
 ```

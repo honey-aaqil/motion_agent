@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-006            stage: REVIEW
+task_id: F-007            stage: REVIEW
 date: 2026-10-27          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-10-27          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: SQLite initialization with `llm_queue` and `llm_log` tables, rate governor with monotonic interval enforcement (15.5s) & daily quota checks against `api_rate_ledger`, persistent queue with priority dispatching (editor outranks batch) & SHA-256 prompt hash idempotency caching, model version assertion (catching silent auto-routing), call attempt logging, and dashboard formatting display, wired to `run_pipeline`
-- `tests\regression\test_f006_rate_governor.py`: Regression tests covering rate governor interval and daily quota cap rejections, queue priority ordering and idempotency, model version mismatch detection, call logging, and pipeline wiring
-- `PHASE_LOG.md`: Phase P1 (F-006) terminal output recorded
+- `src\pipeline.py`: Mock Gemini chaos server (`start_gemini_chaos_server`, `stop_gemini_chaos_server`, `_GeminiChaosHandler`) supporting 503 storm, 429 minute & day, truncated JSON, empty 200, slow response, and wrong model version; `compute_llm_backoff` with exponential backoff & full jitter; `call_gemini_gateway` with chaos mode headers, HTTP error handling, timeout / network error handling, `api_rate_ledger` tracking (503 does not increment call count), and pipeline wiring via `run_pipeline`
+- `tests\regression\test_f007_chaos_server.py`: Regression tests covering backoff math and jitter bounds, chaos server bad inputs, all chaos modes, ledger non-increment on 503, clock-mocked full-state-machine replay (200, 503, 503, 429, midnight reset, crash, lease expiry, 200), and pipeline wiring
+- `PHASE_LOG.md`: Phase P1 (F-007) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-006
-result: passed=33 failed=0   report_sha256: 1699fc31ed2497703412fd9369207a566463dd30d264bbf5cb7b34e6ce0b6cd0   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-007
+result: passed=37 failed=0   report_sha256: 58ad5115ca0296742db832440e3081590f6ff93705889928ff88226bdcc6a8cf   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-007 (Phase P1): Mock Gemini chaos server (SPEC Section 6, 17).
+  Start Feature F-008 (Phase P2): Deterministic renderer and chunking (SPEC Section 12).
