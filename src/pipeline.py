@@ -1,8 +1,9 @@
 """Core pipeline entrypoint, NTFS crash-safe file replacement, and P0 spikes."""
 from __future__ import annotations
 
-import ctypes, hashlib, os, re, sqlite3, time, unicodedata
+import ctypes, hashlib, json, os, random, re, sqlite3, threading, time, unicodedata, urllib.error, urllib.request
 from ctypes import wintypes
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 import psutil
@@ -212,7 +213,7 @@ def run_gemini_diagnostics(config: dict[str, Any] | None = None, sample_results:
 MAX_LLM_CALLS_PER_SCENE, MAX_BIBLE_CALLS_PER_VIDEO = 2, 1
 ALLOWED_SCENE_TRANSITIONS: dict[str, frozenset[str]] = {
     "SCENE_READY": frozenset({"IN_PROGRESS"}), "IN_PROGRESS": frozenset({"SCENE_READY", "DRAFT_AUTHORED", "NEEDS_HUMAN_EDIT"}),
-    "DRAFT_AUTHORED": frozenset({"CANONICALIZED"}), "CANONICALIZED": frozenset({"VALIDATED", "DRAFT_AUTHORED", "NEEDS_HUMAN_EDIT"}),
+    "DRAFT_AUTHORED": frozenset({"CANONICALIZED"}), "CANONICALIZED": frozenset({"VALIDATED", "DRAFT_AUTHORED", "NEEDS_HUMAN_EDIT", "SCENE_READY"}),
     "VALIDATED": frozenset({"SCENE_ACCEPTED"}), "NEEDS_HUMAN_EDIT": frozenset({"SCENE_READY", "VALIDATED"}), "SCENE_ACCEPTED": frozenset(),
 }
 
@@ -421,6 +422,110 @@ def format_llm_status_display(status: str, retry_num: int = 0, next_try_sec: flo
         return f"waiting for LLM (retry {retry_num}, next try in {next_try_sec:.1f} s)"
     return f"LLM status: {status}"
 
+def compute_llm_backoff(retry: int, rng_jitter: float | None = None) -> float:
+    if not isinstance(retry, int) or isinstance(retry, bool): raise TypeError("retry must be an int")
+    if retry < 0: raise ValueError("retry must be non-negative")
+    jitter = random.uniform(0.0, 3.0) if rng_jitter is None else float(rng_jitter)
+    return round(min(120.0, float(2 ** retry + jitter)), 3)
+
+class _GeminiChaosHandler(BaseHTTPRequestHandler):
+    def _send(self, code: int, body: bytes, headers: dict[str, str] | None = None) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        mode = self.headers.get("x-chaos-mode", getattr(self.server, "chaos_mode", "ok"))
+        _ = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if mode == "slow_response":
+            time.sleep(float(self.headers.get("x-chaos-delay", 0.15)))
+        RESPONSES = {
+            "503_storm": (503, b'{"error": {"code": 503, "message": "The model is overloaded.", "status": "UNAVAILABLE"}}', {}),
+            "429_minute": (429, b'{"error": {"code": 429, "message": "Rate limit exceeded.", "status": "RESOURCE_EXHAUSTED"}}', {"Retry-After": "62"}),
+            "429_day": (429, b'{"error": {"code": 429, "message": "Quota exceeded per day.", "status": "RESOURCE_EXHAUSTED"}}', {}),
+            "truncated_json": (200, b'{"candidates": [{"content": {"parts": [{"text": "{\\"scene_id\\": "}]}}], "modelVersion": "gemini-2.5-flash"}', {}),
+            "empty_200": (200, b'{"candidates": [], "modelVersion": "gemini-2.5-flash"}', {}),
+            "wrong_model_version": (200, b'{"candidates": [{"content": {"parts": [{"text": "{\\"status\\": \\"ok\\"}"}]}}], "modelVersion": "gemini-1.5-flash"}', {}),
+        }
+        code, body, hdrs = RESPONSES.get(mode, (200, b'{"candidates": [{"content": {"parts": [{"text": "{\\"status\\": \\"ok\\"}"}], "role": "model"}, "finishReason": "STOP"}], "modelVersion": "gemini-2.5-flash"}', {}))
+        self._send(code, body, hdrs)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+def start_gemini_chaos_server(host: str = "127.0.0.1", port: int = 0, mode: str = "ok") -> tuple[HTTPServer, threading.Thread, str]:
+    if not isinstance(port, int) or port < 0:
+        raise ValueError("port must be non-negative int")
+    server = HTTPServer((host, port), _GeminiChaosHandler)
+    server.chaos_mode = mode  # type: ignore[attr-defined]
+    th = threading.Thread(target=server.serve_forever, daemon=True)
+    th.start()
+    actual_port = server.server_address[1]
+    return server, th, f"http://{host}:{actual_port}"
+
+def stop_gemini_chaos_server(server: HTTPServer, thread: threading.Thread) -> bool:
+    if not isinstance(server, HTTPServer) or not isinstance(thread, threading.Thread):
+        raise TypeError("server and thread must be HTTPServer and Thread instances")
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2.0)
+    return True
+
+def call_gemini_gateway(base_url: str, prompt: str, model_id: str = "gemini-2.5-flash", chaos_mode: str | None = None, timeout: float = 5.0, conn: sqlite3.Connection | None = None, project_id: str = "default_proj") -> dict[str, Any]:
+    if not isinstance(base_url, str) or not base_url.startswith("http://"): raise ValueError("base_url must start with http://")
+    if not isinstance(prompt, str): raise TypeError("prompt must be a string")
+    if not prompt.strip(): raise ValueError("prompt cannot be empty")
+    if not isinstance(model_id, str): raise TypeError("model_id must be a string")
+    if not model_id.strip(): raise ValueError("model_id cannot be empty")
+    hdrs = {"Content-Type": "application/json"}
+    if chaos_mode:
+        hdrs["x-chaos-mode"] = chaos_mode
+    req = urllib.request.Request(f"{base_url.rstrip('/')}/v1beta/models/{model_id}:generateContent", data=json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8"), headers=hdrs, method="POST")
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as err:
+        body = err.read().decode("utf-8", errors="replace")
+        latency = (time.time() - t0) * 1000.0
+        if conn is not None:
+            log_llm_call(conn, project_id, model_id, "gateway", err.code, latency, 1, error_code=f"HTTP_{err.code}")
+        if err.code == 503:
+            return {"status": 503, "error": "503_OVERLOAD", "retryable": True}
+        if err.code == 429:
+            is_day = "per day" in body.lower() or "requests per day" in body.lower()
+            return {"status": 429, "error": "QUOTA_SLEEP_UNTIL_RESET" if is_day else "429_RATE_LIMIT", "retryable": not is_day, "wait_sec": 86400.0 if is_day else 62.0}
+        return {"status": err.code, "error": f"HTTP_{err.code}", "retryable": False}
+    except (urllib.error.URLError, TimeoutError, OSError):
+        latency = (time.time() - t0) * 1000.0
+        if conn is not None:
+            log_llm_call(conn, project_id, model_id, "gateway", 504, latency, 1, error_code="HTTP_504")
+        return {"status": 504, "error": "TIMEOUT", "retryable": True}
+
+    latency = (time.time() - t0) * 1000.0
+    parsed = json.loads(body)
+    m_ver = parsed.get("modelVersion", "")
+    assert_model_version(m_ver, model_id)
+    cands = parsed.get("candidates", [])
+    if not cands or not cands[0].get("content", {}).get("parts"):
+        return {"status": 200, "error": "empty_response", "text": "", "valid": False}
+    cand_text = cands[0]["content"]["parts"][0].get("text", "")
+    try:
+        _ = json.loads(cand_text)
+        is_valid, err_msg = True, None
+    except Exception:
+        is_valid, err_msg = False, "unparseable_output"
+    if conn is not None and is_valid:
+        record_api_call(conn, project_id, model_id, 200)
+        log_llm_call(conn, project_id, model_id, "gateway", 200, latency, 1)
+    ret: dict[str, Any] = {"status": 200, "valid": is_valid, "model_version": m_ver, "text": cand_text}
+    if err_msg:
+        ret["error"] = err_msg
+    return ret
+
 def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(project_root, Path):
         raise TypeError("project_root must be a pathlib.Path instance")
@@ -490,6 +595,16 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         finally:
             conn.close()
 
+    chaos_result = None
+    if payload.get("run_chaos_server"):
+        srv, th, base_url = start_gemini_chaos_server(mode="ok")
+        try:
+            b_sec = compute_llm_backoff(0, rng_jitter=1.0)
+            res = call_gemini_gateway(base_url, "test prompt", model_id="gemini-2.5-flash")
+            chaos_result = {"status": "READY", "backoff": b_sec, "res": res}
+        finally:
+            stop_gemini_chaos_server(srv, th)
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -508,4 +623,6 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["state_machine"] = sm_result
     if gw_result is not None:
         ret["gateway"] = gw_result
+    if chaos_result is not None:
+        ret["chaos"] = chaos_result
     return ret
