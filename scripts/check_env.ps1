@@ -8,6 +8,9 @@ function chk($k, [bool]$pass, $val, $msg, $td, [bool]$warn=$false) {
     if ($st -ne 'PASS' -and $td) { $todo.Add($td) }
 }
 
+$work = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Get-Item .).FullName }
+$projDrive = (Get-Item $work).PSDrive.Name
+
 $nv = try { (node -v 2>$null).Trim() } catch { $null }
 chk 'node' ([bool]$nv) $nv $null "Node.js: Install Node.js LTS"
 
@@ -28,7 +31,7 @@ $pwPath = if ($pw) { $pw.FullName } else { $null }
 chk 'playwright' ([bool]$pw) $pwPath $null "Playwright: playwright install chromium-headless-shell"
 
 $w = (Get-Command "whisper-cli.exe" -EA SilentlyContinue).Source
-$m = Get-ChildItem "C:\motion-agent\models" -Filter "*.bin" -EA SilentlyContinue | Select-Object -First 1
+$m = Get-ChildItem (Join-Path $work "models") -Filter "*.bin" -EA SilentlyContinue | Select-Object -First 1
 $mPath = if ($m) { $m.FullName } else { $null }
 chk 'whisper' ([bool]($w -and $m)) $w $mPath "Whisper: Place whisper-cli.exe and ggml-*.bin model"
 
@@ -39,8 +42,8 @@ chk 'sqlite' $sqOk $sq "required >= 3.51.3" "SQLite: Upgrade python sqlite3 >= 3
 $ram = try { [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB, 2) } catch { 0 }
 chk 'ram' ($ram -ge 1.2) "$ram GB free" $null "RAM: Target >= 1.2 GB free (current $ram GB)" $true
 
-$dsk = try { [math]::Round((Get-PSDrive C).Free / 1GB, 2) } catch { 0 }
-chk 'disk' ($dsk -ge 10.0) "$dsk GB free" $null "Disk: Free at least 10 GB on C: (current $dsk GB)"
+$dsk = try { [math]::Round((Get-PSDrive $projDrive).Free / 1GB, 2) } catch { 0 }
+chk 'disk' ($dsk -ge 10.0) "$dsk GB free" $null "Disk: Free at least 10 GB on ${projDrive}: (current $dsk GB)"
 
 $pwr = try { (powercfg /getactivescheme 2>$null | Out-String).Trim() } catch { $null }
 chk 'power_plan' ([bool]$pwr) $pwr $null "Power (Admin): powercfg /x standby-timeout-ac 0; hibernate-timeout-ac 0; disk-timeout-ac 0"
@@ -48,8 +51,8 @@ chk 'power_plan' ([bool]$pwr) $pwr $null "Power (Admin): powercfg /x standby-tim
 $pf = try { $s = 0; Get-CimInstance Win32_PageFileUsage -EA SilentlyContinue | ForEach-Object { $s += $_.AllocatedBaseSize }; $s } catch { 0 }
 chk 'page_file' ($pf -ge 8192) "$pf MB" "target 8192-12288 MB" "Page file (Admin): Set fixed 8-12 GB pagefile" $true
 
-$dex = try { (Get-MpPreference -EA Stop).ExclusionPath -contains "C:\motion-agent" } catch { $false }
-chk 'defender_exclusion' $dex $dex $null "Defender (Admin): Add-MpPreference -ExclusionPath 'C:\motion-agent'"
+$dex = try { (Get-MpPreference -EA Stop).ExclusionPath -contains $work } catch { $false }
+chk 'defender_exclusion' $dex $dex $null "Defender (Admin): Add-MpPreference -ExclusionPath '$work'"
 
 if ($JsonOut) { $rep | ConvertTo-Json -Depth 4; exit 0 }
 Write-Host "=== Environment Check (Phase P0a) ===" -ForegroundColor Cyan
