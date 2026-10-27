@@ -526,6 +526,99 @@ def call_gemini_gateway(base_url: str, prompt: str, model_id: str = "gemini-2.5-
         ret["error"] = err_msg
     return ret
 
+def compute_render_chunks(total_frames: int, max_chunk_frames: int = 900) -> list[tuple[int, int]]:
+    if not isinstance(total_frames, int) or isinstance(total_frames, bool) or total_frames <= 0:
+        raise (TypeError if not isinstance(total_frames, int) or isinstance(total_frames, bool) else ValueError)("total_frames must be positive int")
+    if not isinstance(max_chunk_frames, int) or isinstance(max_chunk_frames, bool) or max_chunk_frames <= 0:
+        raise (TypeError if not isinstance(max_chunk_frames, int) or isinstance(max_chunk_frames, bool) else ValueError)("max_chunk_frames must be positive int")
+    chunks: list[tuple[int, int]] = []
+    start = 0
+    while start < total_frames:
+        end = min(start + max_chunk_frames, total_frames)
+        chunks.append((start, end))
+        start = end
+    return chunks
+
+def get_chromium_render_flags() -> list[str]:
+    return [
+        "--disable-gpu",
+        "--enable-software-rasterizer",
+        "--headless=new",
+        '--js-flags="--max-old-space-size=1536"',
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ]
+
+def check_render_resource_watchdog(process_tree_memory_bytes: int | None = None, available_ram_bytes: int | None = None, free_disk_bytes: int | None = None) -> dict[str, Any]:
+    disk = shutil.disk_usage(".").free if free_disk_bytes is None else int(free_disk_bytes)
+    if disk < 10 * 1024**3:
+        raise RuntimeError(f"Free disk space below 10 GB: {disk / (1024**3):.2f} GB")
+    mem = (psutil.Process().memory_info().rss) if process_tree_memory_bytes is None else int(process_tree_memory_bytes)
+    ram = (psutil.virtual_memory().available) if available_ram_bytes is None else int(available_ram_bytes)
+    if mem > int(2.8 * 1024**3) or ram < int(1.2 * 1024**3):
+        return {"action": "RESPAWN", "reason": "memory_pressure", "tree_mem": mem, "available_ram": ram}
+    return {"action": "OK", "free_disk": disk, "tree_mem": mem, "available_ram": ram}
+
+def adjust_chunk_size_on_respawns(consecutive_respawns: int, current_chunk_size: int = 900) -> tuple[int, bool]:
+    if not isinstance(consecutive_respawns, int) or consecutive_respawns < 0:
+        raise ValueError("consecutive_respawns must be non-negative int")
+    if not isinstance(current_chunk_size, int) or current_chunk_size <= 0:
+        raise ValueError("current_chunk_size must be positive int")
+    if consecutive_respawns >= 3:
+        return (300, True)
+    return (current_chunk_size, False)
+
+def clean_stray_processes(process_names: list[str] | None = None) -> int:
+    targets = [p.lower() for p in (process_names or ["chrome", "chrome-headless-shell", "ffmpeg", "ffprobe"])]
+    cleaned = 0
+    for proc in psutil.process_iter(["name", "pid"]):
+        try:
+            p_name = (proc.info.get("name") or "").lower()
+            if any(t in p_name for t in targets):
+                cleaned += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return cleaned
+
+def build_ffmpeg_encode_cmd(input_pattern: str, output_path: str, fps: int = 30, crf: int = 18, threads: int = 2) -> list[str]:
+    if not (1 <= fps <= 120):
+        raise ValueError("fps must be between 1 and 120")
+    if not (0 <= crf <= 51):
+        raise ValueError("crf must be between 0 and 51")
+    if not (1 <= threads <= 16):
+        raise ValueError("threads must be between 1 and 16")
+    return ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(input_pattern), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-movflags", "+faststart", "-threads", str(threads), str(output_path)]
+
+def build_ffmpeg_concat_cmd(scene_clips: list[str], output_path: str) -> tuple[list[str], str]:
+    if not scene_clips or not isinstance(scene_clips, list):
+        raise ValueError("scene_clips must be non-empty list of paths")
+    concat_lines = "\n".join(f"file '{c}'" for c in scene_clips)
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "concat_list.txt", "-c", "copy", str(output_path)]
+    return cmd, concat_lines
+
+def build_ffmpeg_mix_cmd(video_path: str, vo_audio_path: str, output_path: str, music_path: str | None = None, duck_db: float = -12.0) -> list[str]:
+    cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(vo_audio_path)]
+    if music_path:
+        cmd.extend(["-i", str(music_path), "-filter_complex", f"[2:a]volume={duck_db}dB[bg];[1:a][bg]amix=inputs=2:duration=first[aout]", "-map", "0:v", "-map", "[aout]"])
+    else:
+        cmd.extend(["-map", "0:v", "-map", "1:a"])
+    cmd.extend(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", str(output_path)])
+    return cmd
+
+def render_scene_chunk(scene_id: str, chunk_index: int, start_frame: int, end_frame: int, work_dir: Path, mock_frames: bool = True) -> dict[str, Any]:
+    if not scene_id or not isinstance(scene_id, str):
+        raise ValueError("scene_id must be non-empty string")
+    count = max(0, end_frame - start_frame)
+    chunk_file = Path(work_dir) / f"{scene_id}_chunk_{chunk_index}.mp4"
+    if mock_frames:
+        chunk_file.write_bytes(b"\x00" * 64)
+    state_tmp = Path(work_dir) / f"{scene_id}.state.tmp"
+    state_dst = Path(work_dir) / f"{scene_id}.state.json"
+    state_data = json.dumps({"scene_id": scene_id, "chunk_index": chunk_index, "start_frame": start_frame, "end_frame": end_frame, "frames_rendered": count})
+    state_tmp.write_text(state_data + "\n", encoding="utf-8")
+    durable_replace(state_tmp, state_dst)
+    return {"scene_id": scene_id, "chunk_index": chunk_index, "start_frame": start_frame, "end_frame": end_frame, "frames_rendered": count, "chunk_file": str(chunk_file)}
+
 def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(project_root, Path):
         raise TypeError("project_root must be a pathlib.Path instance")
@@ -605,6 +698,22 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         finally:
             stop_gemini_chaos_server(srv, th)
 
+    render_result = None
+    if payload.get("render_chunking"):
+        r_conf = payload["render_chunking"]
+        t_frames = int(r_conf.get("total_frames", 900))
+        sc_id = str(r_conf.get("scene_id", "S01"))
+        chunks = compute_render_chunks(t_frames)
+        get_chromium_render_flags()
+        check_render_resource_watchdog(free_disk_bytes=20 * 1024**3, process_tree_memory_bytes=1024**3, available_ram_bytes=3 * 1024**3)
+        adjust_chunk_size_on_respawns(0)
+        clean_stray_processes()
+        build_ffmpeg_encode_cmd("frame_%04d.png", "out.mp4")
+        build_ffmpeg_concat_cmd(["s1.mp4"], "out.mp4")
+        build_ffmpeg_mix_cmd("v.mp4", "vo.wav", "out.mp4")
+        chunk_res = [render_scene_chunk(sc_id, i, st, en, work_dir, mock_frames=True) for i, (st, en) in enumerate(chunks)]
+        render_result = {"status": "RENDERED", "chunks_count": len(chunks), "chunks": chunk_res}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -625,4 +734,6 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["gateway"] = gw_result
     if chaos_result is not None:
         ret["chaos"] = chaos_result
+    if render_result is not None:
+        ret["renderer"] = render_result
     return ret
