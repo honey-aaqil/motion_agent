@@ -209,6 +209,104 @@ def run_gemini_diagnostics(config: dict[str, Any] | None = None, sample_results:
     ]
     return {"status": "DIAGNOSTICS_READY", "has_api_key": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEYS")), "config": cfg, "simulation": run_503_load_simulation(results), "probes": {"backoff_base": backoff_probe, "status_ok": status_probe["action"] == "success"}}
 
+MAX_LLM_CALLS_PER_SCENE, MAX_BIBLE_CALLS_PER_VIDEO = 2, 1
+ALLOWED_SCENE_TRANSITIONS: dict[str, frozenset[str]] = {
+    "SCENE_READY": frozenset({"IN_PROGRESS"}), "IN_PROGRESS": frozenset({"SCENE_READY", "DRAFT_AUTHORED", "NEEDS_HUMAN_EDIT"}),
+    "DRAFT_AUTHORED": frozenset({"CANONICALIZED"}), "CANONICALIZED": frozenset({"VALIDATED", "DRAFT_AUTHORED", "NEEDS_HUMAN_EDIT"}),
+    "VALIDATED": frozenset({"SCENE_ACCEPTED"}), "NEEDS_HUMAN_EDIT": frozenset({"SCENE_READY", "VALIDATED"}), "SCENE_ACCEPTED": frozenset(),
+}
+
+def init_database(db_path: Path | str) -> sqlite3.Connection:
+    if not isinstance(db_path, (str, Path)):
+        raise TypeError("db_path must be a string or pathlib.Path")
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30.0)
+    conn.executescript("""
+        PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=30000;
+        PRAGMA wal_autocheckpoint=1000; PRAGMA journal_size_limit=67108864; PRAGMA foreign_keys=ON;
+        CREATE TABLE IF NOT EXISTS projects (project_id TEXT PRIMARY KEY, title TEXT, status TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS scenes (scene_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scene_index INTEGER NOT NULL, status TEXT NOT NULL, calls_used INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0.0, locked_by TEXT, draft_spec_json TEXT, canonical_spec_json TEXT, validation_log_json TEXT, audit_log_json TEXT, vlm_review_json TEXT, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(project_id));
+        CREATE TABLE IF NOT EXISTS scene_attempts (attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, project_id TEXT NOT NULL, attempt_num INTEGER NOT NULL, prompt_hash TEXT NOT NULL, raw_response TEXT, canonical_spec TEXT, validation_metrics TEXT, dom_metrics TEXT, latency_ms REAL, thoughts_tokens INTEGER, output_tokens INTEGER, created_at REAL NOT NULL, FOREIGN KEY(scene_id) REFERENCES scenes(scene_id));
+        CREATE TABLE IF NOT EXISTS api_rate_ledger (call_id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, model_id TEXT, status_code INTEGER, created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS editor_events (event_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, action_type TEXT NOT NULL, pre_edit_validator_warn INTEGER DEFAULT 0, pre_edit_cv_warn INTEGER DEFAULT 0, token_levenshtein_pct REAL DEFAULT 0.0, anchor_unchanged INTEGER DEFAULT 1, is_clean_quality_pair INTEGER DEFAULT 0, created_at REAL NOT NULL);
+    """)
+    return conn
+
+def transition_scene_state(conn: sqlite3.Connection, scene_id: str, new_status: str, calls_increment: int = 0) -> str:
+    cur = conn.cursor()
+    cur.execute("SELECT status, calls_used FROM scenes WHERE scene_id = ?;", (scene_id,))
+    row = cur.fetchone()
+    if not row:
+        raise ValueError(f"Scene not found: {scene_id}")
+    curr_status, calls_used = row[0], int(row[1])
+    if new_status not in ALLOWED_SCENE_TRANSITIONS.get(curr_status, frozenset()):
+        raise ValueError(f"Illegal state transition from {curr_status} to {new_status}")
+    new_calls = calls_used + int(calls_increment)
+    if new_calls > MAX_LLM_CALLS_PER_SCENE:
+        raise ValueError(f"MAX_LLM_CALLS_PER_SCENE exceeded: {new_calls} > {MAX_LLM_CALLS_PER_SCENE}")
+    cur.execute("UPDATE scenes SET status = ?, calls_used = ?, updated_at = ? WHERE scene_id = ?;", (new_status, new_calls, time.time(), scene_id))
+    conn.commit()
+    return new_status
+
+def acquire_scene_lease(conn: sqlite3.Connection, scene_id: str, worker_id: str, lease_sec: float = 90.0, now: float | None = None) -> bool:
+    t = time.time() if now is None else float(now)
+    cur = conn.cursor()
+    cur.execute("SELECT status, locked_until FROM scenes WHERE scene_id = ?;", (scene_id,))
+    row = cur.fetchone()
+    if not row or (row[0] != "SCENE_READY" and not (row[0] == "IN_PROGRESS" and float(row[1]) < t)):
+        return False
+    cur.execute("UPDATE scenes SET status = 'IN_PROGRESS', locked_by = ?, locked_until = ?, updated_at = ? WHERE scene_id = ?;", (worker_id, t + lease_sec, t, scene_id))
+    conn.commit()
+    return True
+
+def renew_scene_lease(conn: sqlite3.Connection, scene_id: str, worker_id: str, lease_sec: float = 90.0, now: float | None = None) -> bool:
+    t = time.time() if now is None else float(now)
+    cur = conn.cursor()
+    cur.execute("SELECT status, locked_by FROM scenes WHERE scene_id = ?;", (scene_id,))
+    row = cur.fetchone()
+    if not row or row[0] != "IN_PROGRESS" or row[1] != worker_id:
+        return False
+    cur.execute("UPDATE scenes SET locked_until = ?, updated_at = ? WHERE scene_id = ?;", (t + lease_sec, t, scene_id))
+    conn.commit()
+    return True
+
+def release_scene_lease(conn: sqlite3.Connection, scene_id: str, worker_id: str, new_status: str = "SCENE_READY") -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT locked_by FROM scenes WHERE scene_id = ?;", (scene_id,))
+    row = cur.fetchone()
+    if not row or row[0] != worker_id:
+        return False
+    cur.execute("UPDATE scenes SET status = ?, locked_by = NULL, locked_until = 0.0, updated_at = ? WHERE scene_id = ?;", (new_status, time.time(), scene_id))
+    conn.commit()
+    return True
+
+def reclaim_expired_leases(conn: sqlite3.Connection, now: float | None = None) -> int:
+    t = time.time() if now is None else float(now)
+    cur = conn.cursor()
+    cur.execute("UPDATE scenes SET status = 'SCENE_READY', locked_by = NULL, locked_until = 0.0, updated_at = ? WHERE status = 'IN_PROGRESS' AND locked_until < ?;", (t, t))
+    reclaimed = cur.rowcount
+    conn.commit()
+    return max(0, reclaimed)
+
+def classify_error_routing(faults: list[dict[str, Any]], calls_used: int) -> dict[str, Any]:
+    if not isinstance(faults, list):
+        raise TypeError("faults must be a list of dicts")
+    if not isinstance(calls_used, int) or isinstance(calls_used, bool) or calls_used < 0:
+        raise ValueError("calls_used must be a non-negative integer")
+    if calls_used >= MAX_LLM_CALLS_PER_SCENE:
+        return {"route": "NEEDS_HUMAN_EDIT", "reason": "calls_exhausted"}
+    distinct_elements, is_global = set(), False
+    for f in faults:
+        if not isinstance(f, dict):
+            raise TypeError("fault entry must be a dict")
+        ftype = str(f.get("type", ""))
+        if ftype in ("unparseable_output", "empty_response") or (int(f.get("count", 0)) >= 2 and "collision" in ftype) or float(f.get("overlap_area_pct", 0.0)) > 20.0:
+            is_global = True
+        if "element_id" in f:
+            distinct_elements.add(str(f["element_id"]))
+    return {"route": "GLOBAL_RESTART" if (len(distinct_elements) >= 3 or is_global) else "LOCAL_REPAIR", "reason": "routing_decision"}
+
 def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(project_root, Path):
         raise TypeError("project_root must be a pathlib.Path instance")
@@ -238,6 +336,27 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
     work_dir = project_root / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    sm_result = None
+    if payload.get("run_state_machine"):
+        conn = init_database(work_dir / f"{project_id}.db")
+        try:
+            now_ts = time.time()
+            conn.execute("INSERT OR REPLACE INTO projects (project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?);",
+                         (project_id, "Test Project", "VIDEO_NEW", now_ts, now_ts))
+            conn.execute("INSERT OR REPLACE INTO scenes (scene_id, project_id, scene_index, status, calls_used, locked_until, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);",
+                         ("S01", project_id, 1, "SCENE_READY", 0, 0.0, now_ts))
+            conn.commit()
+            acquire_scene_lease(conn, "S01", "worker_main", lease_sec=90.0, now=now_ts)
+            renew_scene_lease(conn, "S01", "worker_main", lease_sec=90.0, now=now_ts + 10.0)
+            transition_scene_state(conn, "S01", "DRAFT_AUTHORED", calls_increment=1)
+            reclaim_expired_leases(conn, now=now_ts)
+            classify_error_routing([{"element_id": "title"}], 1)
+            release_scene_lease(conn, "S01", "worker_main", new_status="SCENE_READY")
+            sm_result = {"status": "READY", "scenes_initialized": 1}
+        finally:
+            conn.close()
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -252,4 +371,6 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["spikes"] = spikes_result
     if gemini_result is not None:
         ret["gemini"] = gemini_result
+    if sm_result is not None:
+        ret["state_machine"] = sm_result
     return ret
