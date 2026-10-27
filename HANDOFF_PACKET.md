@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-003            stage: REVIEW
+task_id: F-004            stage: REVIEW
 date: 2026-10-27          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,14 @@ date: 2026-10-27          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: P0 spike helpers (`validate_audio_filename`, `normalize_vo_text`, `split_sentences`, `compute_scene_duration`, `verify_utf8_roundtrip`, `check_process_memory_budget`) wired to `run_pipeline`
-- `tests\regression\test_f003_spikes.py`: 4 regression tests verifying invalid input rejections, case-insensitive audio matching, VO normalization & danda split, duration calculation, SQLite WAL UTF-8 byte-exact round trip, and process memory budget
-- `SPIKES.md`: Updated empirical measurements and fallbacks for SP-01, SP-02, SP-03, SP-04, SP-07
+- `src\pipeline.py`: Gemini diagnostics, configuration validation, backoff with full jitter calculation, status classification, and 503 load simulation helpers wired to `run_pipeline`
+- `tests\regression\test_f004_gemini.py`: Regression tests verifying bad config rejections, jitter backoff bounds, status code classification (200, 503, 500, 429, 400, 404), fallback switching, queue pause, 30-request 503 load simulation, and pipeline wiring
+- `SPIKES.md`: SP-06 empirical spike verified
+- `PHASE_LOG.md`: Phase P0 (F-004) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-003
-result: passed=20 failed=0   report_sha256: 189c02d5597e8e60b05008fe99deb4fa3fe336e8aeed8df4b7a34377a07d903c   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-004
+result: passed=24 failed=0   report_sha256: c176bdc97f8cf52a022cdc5dfcacc2605536e59c683b9d9489e011223cf1f655   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,4 +31,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-004 (Phase P0): Gemini diagnostics, quota, 503 load test (SPEC Section 6).
+  Start Feature F-005 (Phase P1): SQLite schema, state machine, leases (SPEC Section 5 and 12).

@@ -55,3 +55,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-003
 20 passed in 18.23s
 [PASS Feature F-003] Feature F-003 set to PASS (sha256=189c02d5597e8e60b05008fe99deb4fa3fe336e8aeed8df4b7a34377a07d903c).
 ```
+
+## Phase P0: Gemini Diagnostics & 503 Load (F-004)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-004
+........................                                                 [100%]
+24 passed in 16.99s
+........................                                                 [100%]
+24 passed in 16.88s
+[PASS Feature F-004] Feature F-004 set to PASS (sha256=c176bdc97f8cf52a022cdc5dfcacc2605536e59c683b9d9489e011223cf1f655).
+```
