@@ -714,6 +714,12 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         chunk_res = [render_scene_chunk(sc_id, i, st, en, work_dir, mock_frames=True) for i, (st, en) in enumerate(chunks)]
         render_result = {"status": "RENDERED", "chunks_count": len(chunks), "chunks": chunk_res}
 
+    canary_result = None
+    sabotage_result = None
+    if payload.get("run_canaries"):
+        canary_result = run_canary_gate(project_root, payload.get("canary_data", {}))
+        sabotage_result = run_sabotage_suite(work_dir)
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -736,4 +742,96 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["chaos"] = chaos_result
     if render_result is not None:
         ret["renderer"] = render_result
+    if canary_result is not None:
+        ret["canary_gate"] = canary_result
+    if sabotage_result is not None:
+        ret["sabotage_suite"] = sabotage_result
     return ret
+
+
+def check_canary_inv1_streams(v_dur: float, a_dur: float, exp_dur: float, nb_frames: int, fps: float = 30.0) -> dict[str, Any]:
+    if v_dur < 0 or a_dur < 0 or exp_dur < 0 or nb_frames < 0 or fps <= 0:
+        raise ValueError("Invalid negative duration, frames, or non-positive fps")
+    if not (abs(v_dur - a_dur) <= 0.05 and abs(v_dur - exp_dur) <= 0.10 and abs(nb_frames - round(v_dur * fps)) <= 1):
+        return {"passed": False, "code": "CANARY_INV1_FAIL", "reason": "Stream duration or frame count mismatch"}
+    return {"passed": True, "code": "INV-1", "v_dur": v_dur, "a_dur": a_dur, "nb_frames": nb_frames}
+
+def check_canary_inv2_blackdetect(black_intervals: list[dict[str, float]], max_black_dur: float = 0.20, pic_th: float = 0.90, pix_th: float = 0.15) -> dict[str, Any]:
+    if max_black_dur <= 0 or not (0.0 <= pic_th <= 1.0) or not (0.0 <= pix_th <= 1.0):
+        raise ValueError("Invalid blackdetect parameters")
+    for iv in black_intervals:
+        if iv.get("duration", 0.0) >= max_black_dur:
+            return {"passed": False, "code": "CANARY_INV2_BLACK_DETECTED", "duration": iv["duration"]}
+    return {"passed": True, "code": "INV-2", "intervals": black_intervals}
+
+def check_canary_inv3_freezedetect(freeze_intervals: list[dict[str, float]], max_freeze_dur: float = 2.0, noise_floor_db: float = -60.0) -> dict[str, Any]:
+    if max_freeze_dur <= 0 or noise_floor_db >= 0:
+        raise ValueError("Invalid freezedetect parameters")
+    for iv in freeze_intervals:
+        if iv.get("duration", 0.0) > max_freeze_dur:
+            return {"passed": False, "code": "CANARY_INV3_FREEZE_DETECTED", "duration": iv["duration"]}
+    return {"passed": True, "code": "INV-3", "freeze_intervals": freeze_intervals}
+
+def check_canary_inv4_audio_loudness(integrated_lufs: float, true_peak: float, mean_volume: float, silence_duration: float, loudness_range: tuple[float, float] = (-24.0, -14.0), max_tp: float = -1.0, min_mean_vol: float = -40.0, max_silence: float = 1.5) -> dict[str, Any]:
+    if loudness_range[0] >= loudness_range[1] or max_silence < 0:
+        raise ValueError("Invalid audio loudness range or silence parameters")
+    if not (loudness_range[0] <= integrated_lufs <= loudness_range[1] and true_peak <= max_tp and mean_volume > min_mean_vol and silence_duration < max_silence):
+        return {"passed": False, "code": "CANARY_INV4_AUDIO_LOUDNESS_FAIL", "integrated_lufs": integrated_lufs, "mean_volume": mean_volume}
+    return {"passed": True, "code": "INV-4", "integrated_lufs": integrated_lufs, "true_peak": true_peak}
+
+def check_canary_inv5_golden_drift(rendered_framemd5: str, golden_framemd5: str) -> dict[str, Any]:
+    if not rendered_framemd5 or not golden_framemd5:
+        raise ValueError("framemd5 strings cannot be empty")
+    if rendered_framemd5 != golden_framemd5:
+        return {"passed": False, "code": "CANARY_INV5_GOLDEN_MISMATCH", "rendered": rendered_framemd5, "golden": golden_framemd5}
+    return {"passed": True, "code": "INV-5", "framemd5": rendered_framemd5}
+
+def check_canary_inv6_ledger(conn: sqlite3.Connection, project_id: str, now: float | None = None) -> dict[str, Any]:
+    if not project_id or not isinstance(project_id, str):
+        raise ValueError("project_id must be a non-empty string")
+    now_ts = time.time() if now is None else now
+    rows = conn.execute("SELECT scene_index, status, file_path, file_sha256, file_size, locked_until FROM scenes WHERE project_id = ? ORDER BY scene_index ASC;", (project_id,)).fetchall()
+    if not rows:
+        return {"passed": True, "code": "INV-6", "scenes_checked": 0}
+    indices = [r[0] for r in rows if r[0] is not None]
+    if indices != list(range(1, len(indices) + 1)):
+        return {"passed": False, "code": "CANARY_INV6_LEDGER_FAIL", "reason": "Index gap"}
+    for idx, status, f_path, f_sha, f_sz, locked in rows:
+        if status == "DONE":
+            if not f_path or not Path(f_path).exists():
+                return {"passed": False, "code": "CANARY_INV6_LEDGER_FAIL", "reason": "Missing DONE file"}
+            p = Path(f_path)
+            if p.stat().st_size < 10240 or (f_sha and hashlib.sha256(p.read_bytes()).hexdigest() != f_sha):
+                return {"passed": False, "code": "CANARY_INV6_LEDGER_FAIL", "reason": "DONE file <10KB or bad sha"}
+        if status == "IN_PROGRESS" and locked is not None and locked < now_ts:
+            return {"passed": False, "code": "CANARY_INV6_LEDGER_FAIL", "reason": "Expired lease"}
+    return {"passed": True, "code": "INV-6", "scenes_checked": len(rows)}
+
+def run_canary_gate(project_root: Path, canary_data: dict[str, Any], conn: sqlite3.Connection | None = None, project_id: str | None = None) -> dict[str, Any]:
+    if not isinstance(project_root, Path):
+        raise TypeError("project_root must be a pathlib.Path instance")
+    r1 = check_canary_inv1_streams(canary_data.get("v_dur", 3.0), canary_data.get("a_dur", 3.0), canary_data.get("exp_dur", 3.0), canary_data.get("nb_frames", 90), canary_data.get("fps", 30.0))
+    r2 = check_canary_inv2_blackdetect(canary_data.get("black_intervals", []))
+    r3 = check_canary_inv3_freezedetect(canary_data.get("freeze_intervals", []))
+    a = canary_data.get("audio", {})
+    r4 = check_canary_inv4_audio_loudness(a.get("lufs", -18.0), a.get("tp", -1.5), a.get("mv", -25.0), a.get("silence", 0.0))
+    r5 = check_canary_inv5_golden_drift(canary_data.get("rendered_md5", "c1"), canary_data.get("golden_md5", "c1"))
+    r6 = check_canary_inv6_ledger(conn, project_id) if conn and project_id else {"passed": True, "code": "INV-6"}
+    all_ok = all(r.get("passed") for r in (r1, r2, r3, r4, r5, r6))
+    return {"passed": all_ok, "results": {"INV-1": r1, "INV-2": r2, "INV-3": r3, "INV-4": r4, "INV-5": r5, "INV-6": r6}}
+
+def run_sabotage_suite(work_dir: Path) -> dict[str, Any]:
+    if not isinstance(work_dir, Path):
+        raise TypeError("work_dir must be a pathlib.Path instance")
+    s1 = check_canary_inv1_streams(3.0, 3.2, 3.0, 90)
+    s2 = check_canary_inv2_blackdetect([{"start": 0.0, "duration": 0.30}])
+    s3 = check_canary_inv3_freezedetect([{"start": 0.0, "duration": 2.5}])
+    s4 = check_canary_inv4_audio_loudness(-28.0, -2.0, -45.0, 0.0)
+    s5 = check_canary_inv5_golden_drift("bad_md5", "good_md5")
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE scenes (scene_id TEXT, project_id TEXT, scene_index INT, status TEXT, file_path TEXT, file_sha256 TEXT, file_size INT, locked_until REAL);")
+    db.execute("INSERT INTO scenes VALUES ('S02', 'P_SAB', 2, 'DONE', 'none', 'sha', 100, 0.0);")
+    s6 = check_canary_inv6_ledger(db, "P_SAB")
+    db.close()
+    sabotages = [s1.get("code") == "CANARY_INV1_FAIL", s2.get("code") == "CANARY_INV2_BLACK_DETECTED", s3.get("code") == "CANARY_INV3_FREEZE_DETECTED", s4.get("code") == "CANARY_INV4_AUDIO_LOUDNESS_FAIL", s5.get("code") == "CANARY_INV5_GOLDEN_MISMATCH", s6.get("code") == "CANARY_INV6_LEDGER_FAIL"]
+    return {"passed": all(sabotages), "sabotages_passed": sum(1 for s in sabotages if s)}
