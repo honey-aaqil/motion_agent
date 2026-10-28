@@ -720,6 +720,16 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         canary_result = run_canary_gate(project_root, payload.get("canary_data", {}))
         sabotage_result = run_sabotage_suite(work_dir)
 
+    tg_result = None
+    if payload.get("run_templates_and_gates"):
+        _ = get_layout_config("9:16")
+        cat = get_template_catalog()
+        can = canonicalize_scene_spec({"scene_id": "S01", "template_id": "title_slam", "ratio": "9:16", "cues": []})
+        val = validate_scene_spec(can)
+        dom = audit_dom_layout([{"id": "b1", "x": 100, "y": 200, "w": 400, "h": 200, "text": "OK", "font_size": 72, "color": "#FFFFFF", "bg": "#000000"}])
+        sb = run_dom_sabotage_preflight()
+        tg_result = {"passed": val["valid"] and dom["passed"] and sb["passed"], "catalog_size": len(cat), "preflight": sb}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -746,6 +756,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["canary_gate"] = canary_result
     if sabotage_result is not None:
         ret["sabotage_suite"] = sabotage_result
+    if tg_result is not None:
+        ret["templates_and_gates"] = tg_result
     return ret
 
 
@@ -835,3 +847,123 @@ def run_sabotage_suite(work_dir: Path) -> dict[str, Any]:
     db.close()
     sabotages = [s1.get("code") == "CANARY_INV1_FAIL", s2.get("code") == "CANARY_INV2_BLACK_DETECTED", s3.get("code") == "CANARY_INV3_FREEZE_DETECTED", s4.get("code") == "CANARY_INV4_AUDIO_LOUDNESS_FAIL", s5.get("code") == "CANARY_INV5_GOLDEN_MISMATCH", s6.get("code") == "CANARY_INV6_LEDGER_FAIL"]
     return {"passed": all(sabotages), "sabotages_passed": sum(1 for s in sabotages if s)}
+
+LAYOUT_CONFIGS: dict[str, dict[str, int]] = {
+    "9:16": {"width": 1080, "height": 1920, "side_margin": 72, "top_margin": 150, "caption_safe_bottom": 440, "min_headline": 72, "min_label": 44},
+    "16:9": {"width": 1920, "height": 1080, "side_margin": 96, "top_margin": 60, "caption_safe_bottom": 190, "min_headline": 64, "min_label": 36},
+}
+
+TEMPLATE_CATALOG: tuple[dict[str, Any], ...] = (
+    {"template_id": "title_slam", "slots": ["title", "subtitle"], "portrait": {}, "landscape": {}},
+    {"template_id": "big_statement", "slots": ["statement"], "portrait": {}, "landscape": {}},
+    {"template_id": "concept_diagram", "slots": ["concept", "node1", "node2"], "portrait": {}, "landscape": {}},
+    {"template_id": "comparison_split", "slots": ["left", "right"], "portrait": {}, "landscape": {}},
+    {"template_id": "process_flow", "slots": ["s1", "s2", "s3"], "portrait": {}, "landscape": {}},
+    {"template_id": "timeline", "slots": ["p1", "p2"], "portrait": {}, "landscape": {}},
+    {"template_id": "stat_counter", "slots": ["num", "label"], "portrait": {}, "landscape": {}},
+    {"template_id": "icon_grid", "slots": ["i1", "i2", "i3", "i4"], "portrait": {}, "landscape": {}},
+    {"template_id": "chart", "slots": ["title", "data"], "portrait": {}, "landscape": {}},
+    {"template_id": "image_focus", "slots": ["image", "caption"], "portrait": {}, "landscape": {}},
+    {"template_id": "two_image_contrast", "slots": ["img_a", "img_b"], "portrait": {}, "landscape": {}},
+    {"template_id": "quote", "slots": ["quote", "author"], "portrait": {}, "landscape": {}},
+    {"template_id": "list_reveal", "slots": ["i1", "i2", "i3"], "portrait": {}, "landscape": {}},
+    {"template_id": "outro", "slots": ["headline", "cta"], "portrait": {}, "landscape": {}},
+)
+
+def get_layout_config(ratio: str = "9:16") -> dict[str, int]:
+    if ratio not in LAYOUT_CONFIGS:
+        raise ValueError(f"Invalid layout ratio: {ratio!r}")
+    return dict(LAYOUT_CONFIGS[ratio])
+
+def get_template_catalog() -> list[dict[str, Any]]:
+    return [dict(t) for t in TEMPLATE_CATALOG]
+
+def canonicalize_scene_spec(draft: dict[str, Any] | str, story_bible: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(draft, (dict, str)):
+        raise TypeError("draft must be a dict or json string")
+    if isinstance(draft, str):
+        s = draft.strip()
+        open_b = s.count("{") - s.count("}")
+        if open_b > 0:
+            s += "}" * open_b
+        s = re.sub(r",\s*([\]}])", r"\1", s)
+        data = json.loads(s)
+    else:
+        data = dict(draft)
+    tokens = (story_bible or {}).get("tokens", {})
+    for k, v in list(data.items()):
+        if isinstance(v, str) and v.startswith("$") and v in tokens:
+            data[k] = tokens[v]
+    cw, ch = (1080, 1920) if data.get("ratio") == "9:16" else (1920, 1080)
+    if isinstance(data.get("box"), dict):
+        b = data["box"]
+        if -0.05 * cw <= b.get("x", 0) < 0:
+            b["x"] = 0
+        if -0.05 * ch <= b.get("y", 0) < 0:
+            b["y"] = 0
+        if cw < b.get("x", 0) + b.get("w", 0) <= cw * 1.05:
+            b["w"] = cw - b.get("x", 0)
+        if ch < b.get("y", 0) + b.get("h", 0) <= ch * 1.05:
+            b["h"] = ch - b.get("y", 0)
+    return data
+
+def validate_scene_spec(spec: dict[str, Any], audio_duration: float | None = None, lead_in: float = 0.3, tail: float = 0.5) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        raise TypeError("spec must be a dict")
+    codes: list[str] = []
+    known = {t["template_id"] for t in TEMPLATE_CATALOG}
+    if spec.get("template_id") not in known:
+        codes.append("INVALID_TEMPLATE")
+    if audio_duration is not None:
+        expected = round(audio_duration + lead_in + tail, 3)
+        if abs(float(spec.get("duration", 0.0)) - expected) > 0.05:
+            codes.append("DURATION_MISMATCH")
+    for cue in spec.get("cues", []):
+        anc = str(cue.get("anchor", ""))
+        if re.match(r"^@\d+(\.\d+)?s$", anc):
+            codes.append("INVALID_CUE_ABSOLUTE_TIMESTAMP")
+        elif not anc.startswith("@") or not re.match(r"^@(scene|s\d+)\.", anc):
+            codes.append("INVALID_CUE_ANCHOR")
+    for val in (spec.get("slots") or {}).values():
+        if isinstance(val, str) and len(val.split()) > 4:
+            codes.append("WORD_COUNT_EXCEEDED")
+    return {"valid": len(codes) == 0, "codes": codes}
+
+def audit_dom_layout(boxes: list[dict[str, Any]], ratio: str = "9:16") -> dict[str, Any]:
+    if not isinstance(boxes, list):
+        raise TypeError("boxes must be a list")
+    if not boxes:
+        return {"passed": False, "code": "GATE_EXEC_ERROR", "violations": [{"code": "GATE_EXEC_ERROR"}]}
+    cfg = get_layout_config(ratio)
+    cap_safe = cfg["height"] - cfg["caption_safe_bottom"]
+    violations: list[dict[str, Any]] = []
+    def _lum(c: str) -> float:
+        h = c.lstrip("#")
+        if len(h) == 3:
+            h = "".join(x * 2 for x in h)
+        r, g, b = (int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    for b in boxes:
+        if b.get("y", 0) + b.get("h", 0) > cap_safe:
+            violations.append({"code": "CAPTION_SAFE_VIOLATION", "id": b.get("id")})
+        txt = str(b.get("text", ""))
+        if "undefined" in txt or "NaN" in txt:
+            violations.append({"code": "DOM_TRAP_TRIGGERED", "id": b.get("id")})
+        if b.get("color") and b.get("bg"):
+            l1, l2 = sorted([_lum(b["color"]), _lum(b["bg"])], reverse=True)
+            if (l1 + 0.05) / (l2 + 0.05) < (3.0 if b.get("font_size", 0) >= 56 else 4.5):
+                violations.append({"code": "DOM_LOW_CONTRAST", "id": b.get("id")})
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            b1, b2 = boxes[i], boxes[j]
+            if min(b1["x"] + b1["w"], b2["x"] + b2["w"]) > max(b1["x"], b2["x"]) and min(b1["y"] + b1["h"], b2["y"] + b2["h"]) > max(b1["y"], b2["y"]):
+                violations.append({"code": "DOM_OVERLAP_DETECTED", "pair": (b1.get("id"), b2.get("id"))})
+    return {"passed": len(violations) == 0, "code": "OK" if not violations else violations[0]["code"], "violations": violations}
+
+def run_dom_sabotage_preflight() -> dict[str, Any]:
+    ov = audit_dom_layout([{"id": "a", "x": 0, "y": 0, "w": 100, "h": 100}, {"id": "b", "x": 50, "y": 50, "w": 100, "h": 100}])
+    lc = audit_dom_layout([{"id": "c", "x": 0, "y": 0, "w": 100, "h": 100, "color": "#222", "bg": "#111"}])
+    mv = validate_scene_spec({"template_id": "bad"})
+    caught = int(not ov["passed"]) + int(not lc["passed"]) + int(not mv["valid"])
+    return {"passed": caught == 3, "sabotages_caught": caught}
+
