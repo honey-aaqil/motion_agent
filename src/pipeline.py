@@ -730,6 +730,16 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         sb = run_dom_sabotage_preflight()
         tg_result = {"passed": val["valid"] and dom["passed"] and sb["passed"], "catalog_size": len(cat), "preflight": sb}
 
+    pap_result = None
+    if payload.get("run_parser_and_audio_pack"):
+        s_txt = str(payload.get("script_text", ""))
+        parsed_res = parse_av_script(s_txt, vo_extra=payload.get("vo_extra"))
+        _ = normalize_sacred_vo(s_txt)
+        _ = rebuild_vo_text(parsed_res["scenes"], lang="en")
+        ap_res = generate_audio_pack(parsed_res["scenes"], project_meta=payload.get("project_meta"))
+        exp_res = export_audio_pack(ap_res, project_root)
+        pap_result = {"status": "PARSED_AND_PACKED", "parsed": parsed_res, "audio_pack": ap_res, "export": exp_res}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -758,6 +768,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["sabotage_suite"] = sabotage_result
     if tg_result is not None:
         ret["templates_and_gates"] = tg_result
+    if pap_result is not None:
+        ret["parser_audio_pack"] = pap_result
     return ret
 
 
@@ -966,4 +978,124 @@ def run_dom_sabotage_preflight() -> dict[str, Any]:
     mv = validate_scene_spec({"template_id": "bad"})
     caught = int(not ov["passed"]) + int(not lc["passed"]) + int(not mv["valid"])
     return {"passed": caught == 3, "sabotages_caught": caught}
+
+def normalize_sacred_vo(text: str) -> str:
+    if not isinstance(text, str):
+        raise TypeError("VO text must be a string")
+    return unicodedata.normalize("NFC", text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n"))
+
+def parse_av_script(script_text: str, vo_extra: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
+    if not isinstance(script_text, str):
+        raise TypeError("script_text must be a string")
+    if not script_text.strip():
+        raise ValueError("script_text cannot be empty")
+    cleaned = normalize_sacred_vo(script_text)
+    scenes: list[dict[str, Any]] = []
+    uncertain: list[dict[str, str]] = []
+    for line in cleaned.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        if "|" in raw:
+            cols = [c.strip() for c in raw.strip("|").split("|")]
+            if (any(h in cols[0].lower() for h in ["scene", "time"]) and len(cols) >= 2) or all(re.match(r"^:?-+:?$", c) for c in cols if c):
+                continue
+            if len(cols) >= 2:
+                sc_col, vis_col = cols[0], cols[1]
+                aud_col = cols[2] if len(cols) > 2 else ""
+                sc_m = re.search(r"\b(S\d+)\b", sc_col, re.IGNORECASE)
+                sc_id = sc_m.group(1).upper() if sc_m else f"S{len(scenes)+1:02d}"
+                tc_m = re.search(r"(\d+:\d+(?:-\d+:\d+)?)", sc_col)
+                ost = re.findall(r'"([^"]+)"', vis_col) or [m.group(1).strip() for m in [re.search(r'TEXT:\s*([^.]+)', vis_col, re.I)] if m]
+                sm = re.search(r'Style:\s*([^.]+)', vis_col, re.I)
+                style_hint = sm.group(1).strip() if sm else ""
+                vo: dict[str, str] = {"en": "", "hi": "", "ta": ""}
+                music_cues, sfx_cues = [], []
+                cue_pat = re.compile(r'(?:\*\*|\b)(VO(?:\s*\((EN|HI|TA)\))?|MUSIC|SFX):?\*?\*?:?\s*(.*?)(?=(?:\s*\*\*(?:VO|MUSIC|SFX)|\s*\b(?:VO|MUSIC|SFX)\b:|$))', re.I | re.S)
+                for cm in cue_pat.finditer(aud_col):
+                    tag, raw_c = cm.group(1).upper(), cm.group(3).strip().strip('"').strip("'")
+                    if "MUSIC" in tag and raw_c:
+                        music_cues.append(raw_c.rstrip(".,"))
+                    elif "SFX" in tag and raw_c:
+                        sfx_cues.append(raw_c.rstrip(".,"))
+                    elif "VO" in tag and raw_c:
+                        vo[cm.group(2).lower() if cm.group(2) else "en"] = normalize_sacred_vo(raw_c)
+                if not vo["en"] and not music_cues and not sfx_cues and aud_col.strip():
+                    vo["en"] = normalize_sacred_vo(aud_col.strip().strip('"\''))
+                if vo_extra:
+                    for lk in ("en", "hi", "ta"):
+                        if lk in vo_extra and sc_id in vo_extra[lk]:
+                            vo[lk] = normalize_sacred_vo(vo_extra[lk][sc_id])
+                scenes.append({"id": sc_id, "timecode_hint": tc_m.group(1) if tc_m else "", "directions": [vis_col.strip()], "onscreen_text": ost, "vo": vo, "music": music_cues, "sfx": sfx_cues, "style_hint": style_hint, "entities": [style_hint] if style_hint else [], "uncertain": []})
+                continue
+        uncertain.append({"line": raw, "reason": "Unrecognized script layout or missing table delimiter", "question": f"How should this line be categorized: visual direction or audio narration? '{raw}'"})
+    return {"scenes": scenes, "uncertain_questions": uncertain, "total_scenes": len(scenes)}
+
+def rebuild_vo_text(scenes: list[dict[str, Any]], lang: str = "en") -> str:
+    if not isinstance(scenes, list):
+        raise TypeError("scenes must be a list")
+    if lang not in ("en", "hi", "ta"):
+        raise ValueError(f"Unsupported language '{lang}'. Must be one of en, hi, ta.")
+    return "\n".join([sc.get("vo", {}).get(lang, "") for sc in scenes if sc.get("vo", {}).get(lang, "")])
+
+def generate_audio_pack(scenes: list[dict[str, Any]], project_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(scenes, list):
+        raise TypeError("scenes must be a list")
+    meta = project_meta or {}
+    audio_scenes: dict[str, dict[str, Any]] = {}
+    all_sfx: list[dict[str, Any]] = []
+    tot_sec = 0.0
+    for sc in scenes:
+        sc_id = str(sc.get("id", "S01"))
+        audio_scenes[sc_id] = {}
+        for lk in ("en", "hi", "ta"):
+            vt = sc.get("vo", {}).get(lk, "")
+            dur = max(2.0, round(len(vt.split()) / 2.4, 1)) if vt.split() else 0.0
+            if lk == "en":
+                tot_sec += dur
+            audio_scenes[sc_id][lk] = {
+                "text": vt,
+                "tts_direction": {
+                    "character": meta.get("voice_character", "authoritative, engaging narrator"),
+                    "pace": "medium (140-150 wpm)",
+                    "emotion": "informative, confident",
+                    "pauses": ["0.3s between sentences", "0.5s before visual transitions"],
+                    "pronunciation_notes": meta.get("pronunciation_notes", {}),
+                },
+                "estimated_duration_sec": dur,
+            }
+        for sfx_item in sc.get("sfx", []):
+            all_sfx.append({"scene_id": sc_id, "cue": sfx_item})
+    m_dur = max(30.0, round(tot_sec * 1.10, 1))
+    m_prompts = [{
+        "genre": meta.get("music_genre", "ambient cinematic"),
+        "tempo": meta.get("music_tempo", "medium 90-100 bpm"),
+        "instruments": meta.get("music_instruments", ["synth pads", "sub bass", "light arpeggio"]),
+        "mood_arc": "mysterious start building to energetic discovery",
+        "no_vocals": True,
+        "loopable": True,
+        "duration_sec": m_dur,
+        "prompt": f"Instrumental background music, {meta.get('music_genre', 'ambient cinematic')}, tempo 95 bpm, synth pads and sub bass, mysterious to energetic, low intensity under narration, loopable, no vocals.",
+    }]
+    return {"scenes": audio_scenes, "project_music_prompts": m_prompts, "project_sfx_list": all_sfx, "total_estimated_duration_sec": tot_sec}
+
+def export_audio_pack(audio_pack: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+    if not isinstance(output_dir, Path):
+        raise TypeError("output_dir must be a pathlib.Path instance")
+    if not isinstance(audio_pack, dict):
+        raise TypeError("audio_pack must be a dict")
+    pdir = output_dir / "audio_pack"
+    pdir.mkdir(parents=True, exist_ok=True)
+    count = 3
+    (pdir / "audio_pack.json").write_text(json.dumps(audio_pack, indent=2, ensure_ascii=False), encoding="utf-8")
+    (pdir / "music_prompts.json").write_text(json.dumps(audio_pack.get("project_music_prompts", []), indent=2), encoding="utf-8")
+    (pdir / "sfx_list.json").write_text(json.dumps(audio_pack.get("project_sfx_list", []), indent=2), encoding="utf-8")
+    for lk in ("en", "hi", "ta"):
+        lines = [f"[{s_id}] {d.get(lk, {}).get('text', '')}" for s_id, d in audio_pack.get("scenes", {}).items() if d.get(lk, {}).get("text")]
+        if lines:
+            (pdir / f"vo_{lk}.txt").write_text("\n".join(lines), encoding="utf-8")
+            count += 1
+    return {"status": "EXPORTED", "files_written": count, "dir": str(pdir)}
+
+
 
