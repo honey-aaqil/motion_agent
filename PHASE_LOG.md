@@ -103,3 +103,14 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-008
 41 passed in 18.00s
 [PASS Feature F-008] Feature F-008 set to PASS (sha256=bd89f696dc53028d05b7d8d3eda42d4ba2279bde62ca89eb1e9304b5ff1a1efe).
 ```
+
+## Phase P2: Render Canaries INV-1..6 with Sabotage Fixtures (F-009)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-009
+................................................                         [100%]
+48 passed in 19.73s
+................................................                         [100%]
+48 passed in 21.13s
+[PASS Feature F-009] Feature F-009 set to PASS (sha256=753f4b42efd35b101a3da406155d100b44091dd206cd9e61261184dfd1eff586).
+```
+
