@@ -114,3 +114,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-009
 [PASS Feature F-009] Feature F-009 set to PASS (sha256=753f4b42efd35b101a3da406155d100b44091dd206cd9e61261184dfd1eff586).
 ```
 
+## Phase P3: Templates, canonicalizer, validator, DOM gate (F-010)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-010
+...................................................                      [100%]
+51 passed in 20.09s
+...................................................                      [100%]
+51 passed in 20.55s
+[PASS Feature F-010] Feature F-010 set to PASS (sha256=0aa73d384f0b59f93c9414db78df51abe45188df7cfcdd4407a2fadd3cdb460f).
+```
+
