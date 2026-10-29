@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-014            stage: REVIEW
+task_id: F-015            stage: REVIEW
 date: 2026-10-29          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-10-29          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: StoryBible default creator (`create_default_story_bible`), StoryBible prompt builder (`build_story_bible_prompt`), Scene Author prompt builder (`build_scene_author_prompt`), 1-hop previous scene exit state extractor bounded <=80 tokens (`extract_scene_exit_state`), targeted repair / fresh restart prompt builder (`build_repair_or_restart_prompt`), content-dropping repair rejection validator (`validate_repair_entity_retention`), adaptive thinking step-down evaluator (`evaluate_thinking_step_down`), and SQLite scene attempt telemetry recorder (`record_scene_attempt`), all wired into `run_pipeline`
-- `tests\regression\test_f014_story_bible_author.py`: Regression tests for StoryBible default generation, exit state extraction, scene author prompting, local repair vs global restart prompt construction, entity drop rejection rules, thinking level step-down logic, attempt recording in SQLite, and pipeline authoring execution
-- `PHASE_LOG.md`: Phase P7 (F-014) terminal verification output recorded
+- `src\pipeline.py`: Dataset loader (`load_eval_dataset`), SQLite scene trials recorder (`record_scene_trial`), exact mid-p McNemar calculator (`mcnemar_exact_mid_p`), paired bootstrap CI calculator (`paired_bootstrap_ci`), Stage 1 abort gate (`evaluate_stage1_gate`), Ship/Block decision gate (`evaluate_ship_block_gate`), WCAG contrast evaluator (`compute_wcag_contrast`), local visual metrics calculator (`compute_local_visual_metrics`), Goodhart guards checker (`check_goodhart_guards`), vision-judge calibration evaluator (`compute_judge_calibration`), human contact sheet generator (`generate_human_contact_sheet`), and contact sheet gate evaluator (`evaluate_contact_sheet_gate`), plus `scene_trials` SQLite table, all wired into `run_pipeline`
+- `tests\regression\test_f015_eval_harness.py`: Regression tests for dataset parsing, trials persistence, McNemar, bootstrap CI, Stage 1 abort, Ship/Block gate, WCAG contrast and bounding-box edge overlap/clutter, Goodhart guards, judge calibration metrics, contact sheet generation and gating, and pipeline integration
+- `PHASE_LOG.md`: Phase P8 (F-015) terminal verification output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-014
-result: passed=72 failed=0   report_sha256: 61dc2e085152433f84fec469d0ab6d70f3358c12fa2bb3620e00e50e8269306d   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-015
+result: passed=78 failed=0   report_sha256: 81a9cd2c13b16296809ca989868025e093afb694472aa4ff10d2a2015fa60edd   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,7 +30,8 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-015 (Phase P8): Evaluation harness and gates (SPEC Section 13).
+  Start Feature F-016 (Phase P9): Dashboard, watchdog, auto-start (SPEC Sections 11, 12).
+
 
 
 

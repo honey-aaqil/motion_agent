@@ -164,5 +164,18 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-014
 [PASS Feature F-014] Feature F-014 set to PASS (sha256=61dc2e085152433f84fec469d0ab6d70f3358c12fa2bb3620e00e50e8269306d).
 ```
 
+## Phase P8: Evaluation harness and gates (F-015)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-015
+........................................................................ [ 92%]
+......                                                                   [100%]
+78 passed in 20.91s
+........................................................................ [ 92%]
+......                                                                   [100%]
+78 passed in 18.81s
+[PASS Feature F-015] Feature F-015 set to PASS (sha256=81a9cd2c13b16296809ca989868025e093afb694472aa4ff10d2a2015fa60edd).
+```
+
+
 
 
