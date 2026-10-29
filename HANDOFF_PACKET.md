@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-013            stage: REVIEW
+task_id: F-014            stage: REVIEW
 date: 2026-10-29          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-10-29          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Scene timing calculator (`compute_scene_timing`), uploaded audio file validator checking missing and extra files (`validate_uploaded_audio_files`), sentence anchor extraction & alignment with whisper and silence fallback and confidence tracking (`align_sentence_anchors`), cue anchor timing resolver prohibiting absolute timestamps (`resolve_cue_timing`), whisper CLI command generator (`build_whisper_alignment_cmd`), and ffprobe duration measurement (`measure_audio_duration_ffprobe`), wired directly into `run_pipeline`
-- `tests\regression\test_f013_timing_and_anchors.py`: Regression tests for audio duration measurement, file upload validation, single and multi-sentence alignment, silence fallback, confidence mapping, multilingual anchors (hi, ta), cue resolution with offset/clamping and syntax validation, whisper command builder, and full pipeline wiring
-- `PHASE_LOG.md`: Phase P6 (F-013) terminal output recorded
+- `src\pipeline.py`: StoryBible default creator (`create_default_story_bible`), StoryBible prompt builder (`build_story_bible_prompt`), Scene Author prompt builder (`build_scene_author_prompt`), 1-hop previous scene exit state extractor bounded <=80 tokens (`extract_scene_exit_state`), targeted repair / fresh restart prompt builder (`build_repair_or_restart_prompt`), content-dropping repair rejection validator (`validate_repair_entity_retention`), adaptive thinking step-down evaluator (`evaluate_thinking_step_down`), and SQLite scene attempt telemetry recorder (`record_scene_attempt`), all wired into `run_pipeline`
+- `tests\regression\test_f014_story_bible_author.py`: Regression tests for StoryBible default generation, exit state extraction, scene author prompting, local repair vs global restart prompt construction, entity drop rejection rules, thinking level step-down logic, attempt recording in SQLite, and pipeline authoring execution
+- `PHASE_LOG.md`: Phase P7 (F-014) terminal verification output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-013
-result: passed=67 failed=0   report_sha256: 45d4db5e216af8b184171bf46d0c7bbd87f34d146f675720ae8df14062e88aad   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-014
+result: passed=72 failed=0   report_sha256: 61dc2e085152433f84fec469d0ab6d70f3358c12fa2bb3620e00e50e8269306d   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,6 +30,7 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-014 (Phase P7): StoryBible, Scene Author, repair/restart routing (SPEC Section 4).
+  Start Feature F-015 (Phase P8): Evaluation harness and gates (SPEC Section 13).
+
 
 

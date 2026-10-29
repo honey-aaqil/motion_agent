@@ -154,4 +154,15 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-013
 [PASS Feature F-013] Feature F-013 set to PASS (sha256=45d4db5e216af8b184171bf46d0c7bbd87f34d146f675720ae8df14062e88aad).
 ```
 
+## Phase P7: StoryBible, Scene Author, repair/restart routing (F-014)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-014
+........................................................................ [100%]
+72 passed in 20.72s
+........................................................................ [100%]
+72 passed in 20.53s
+[PASS Feature F-014] Feature F-014 set to PASS (sha256=61dc2e085152433f84fec469d0ab6d70f3358c12fa2bb3620e00e50e8269306d).
+```
+
+
 
