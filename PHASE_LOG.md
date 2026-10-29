@@ -144,4 +144,14 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-012
 [PASS Feature F-012] Feature F-012 set to PASS (sha256=e497511d04e1a02507e142ec383634fb58fded6160b916dfbf842e8d3423ddac).
 ```
 
+## Phase P6: Timing and sentence anchors (F-013)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-013
+...................................................................      [100%]
+67 passed in 20.82s
+...................................................................      [100%]
+67 passed in 20.64s
+[PASS Feature F-013] Feature F-013 set to PASS (sha256=45d4db5e216af8b184171bf46d0c7bbd87f34d146f675720ae8df14062e88aad).
+```
+
 

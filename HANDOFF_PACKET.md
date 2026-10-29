@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-012            stage: REVIEW
+task_id: F-013            stage: REVIEW
 date: 2026-10-29          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-10-29          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: License filter accepting CC0, PD, CC-BY (with attribution), Pexels, Pixabay, Unsplash, Mixkit, Coverr, OFL, MIT, ISC, Apache-2.0 and silently rejecting NC, ND, ShareAlike, editorial-only, watermarked, and unknown licenses (`filter_asset_license`); Action-needed detector for risky user uploads, endorsement risks, and slots with no safe alternatives (`detect_action_needed`); AssetLedger manager for asset CRUD and atomic JSON export (`AssetLedger`); Ready-to-paste markdown attribution generator (`generate_credits_markdown`); SHA-256 hash-cached background removal with rembg fallback (`remove_background_cached`), wired directly into `run_pipeline`
-- `tests\regression\test_f012_assets_and_ledger.py`: Regression tests for license filtering contracts and acceptance/silent rejections, action-needed warnings, asset ledger CRUD and atomic export, credits markdown generation, background removal caching by sha256 hash, and full pipeline wiring
-- `PHASE_LOG.md`: Phase P5 (F-012) terminal output recorded
+- `src\pipeline.py`: Scene timing calculator (`compute_scene_timing`), uploaded audio file validator checking missing and extra files (`validate_uploaded_audio_files`), sentence anchor extraction & alignment with whisper and silence fallback and confidence tracking (`align_sentence_anchors`), cue anchor timing resolver prohibiting absolute timestamps (`resolve_cue_timing`), whisper CLI command generator (`build_whisper_alignment_cmd`), and ffprobe duration measurement (`measure_audio_duration_ffprobe`), wired directly into `run_pipeline`
+- `tests\regression\test_f013_timing_and_anchors.py`: Regression tests for audio duration measurement, file upload validation, single and multi-sentence alignment, silence fallback, confidence mapping, multilingual anchors (hi, ta), cue resolution with offset/clamping and syntax validation, whisper command builder, and full pipeline wiring
+- `PHASE_LOG.md`: Phase P6 (F-013) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-012
-result: passed=63 failed=0   report_sha256: e497511d04e1a02507e142ec383634fb58fded6160b916dfbf842e8d3423ddac   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-013
+result: passed=67 failed=0   report_sha256: 45d4db5e216af8b184171bf46d0c7bbd87f34d146f675720ae8df14062e88aad   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,5 +30,6 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-013 (Phase P6): Timing and sentence anchors (SPEC Section 3).
+  Start Feature F-014 (Phase P7): StoryBible, Scene Author, repair/restart routing (SPEC Section 4).
+
 
