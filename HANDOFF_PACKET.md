@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-015            stage: REVIEW
+task_id: F-016            stage: REVIEW
 date: 2026-10-29          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,14 @@ date: 2026-10-29          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Dataset loader (`load_eval_dataset`), SQLite scene trials recorder (`record_scene_trial`), exact mid-p McNemar calculator (`mcnemar_exact_mid_p`), paired bootstrap CI calculator (`paired_bootstrap_ci`), Stage 1 abort gate (`evaluate_stage1_gate`), Ship/Block decision gate (`evaluate_ship_block_gate`), WCAG contrast evaluator (`compute_wcag_contrast`), local visual metrics calculator (`compute_local_visual_metrics`), Goodhart guards checker (`check_goodhart_guards`), vision-judge calibration evaluator (`compute_judge_calibration`), human contact sheet generator (`generate_human_contact_sheet`), and contact sheet gate evaluator (`evaluate_contact_sheet_gate`), plus `scene_trials` SQLite table, all wired into `run_pipeline`
-- `tests\regression\test_f015_eval_harness.py`: Regression tests for dataset parsing, trials persistence, McNemar, bootstrap CI, Stage 1 abort, Ship/Block gate, WCAG contrast and bounding-box edge overlap/clutter, Goodhart guards, judge calibration metrics, contact sheet generation and gating, and pipeline integration
-- `PHASE_LOG.md`: Phase P8 (F-015) terminal verification output recorded
+- `src\pipeline.py`: Machine health inspection (`get_machine_health`), HTML dashboard rendering (`render_dashboard_html`), watchdog conditions evaluator (`check_watchdog_conditions`), alert throttling logic (`evaluate_alert_throttling`), dead-man switch scheduler (`schedule_dead_man_switch`), Task Scheduler autostart generator (`generate_autostart_task_cmd`), and watchdog observer runner (`run_watchdog_observer`), all wired into `run_pipeline`
+- `scripts\watchdog_observer.py`: Task Scheduler CLI entrypoint for periodic monitoring and atomic status.html updates
+- `tests\regression\test_f016_dashboard_watchdog.py`: Regression tests for machine health, dashboard HTML, alert conditions, 4-hour throttling, dead-man switch, autostart commands, observer run, and pipeline integration
+- `PHASE_LOG.md`: Phase P9 (F-016) verification output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-015
-result: passed=78 failed=0   report_sha256: 81a9cd2c13b16296809ca989868025e093afb694472aa4ff10d2a2015fa60edd   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-016
+result: passed=83 failed=0   report_sha256: e0b1279273a1ade8d551ea14861f3dfff1f0a1cbda28311d71b6ce7aeecc1d36   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,7 +31,8 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-016 (Phase P9): Dashboard, watchdog, auto-start (SPEC Sections 11, 12).
+  Start Feature F-017 (Phase P10): Editor, overrides, editor_events (SPEC Section 11).
+
 
 
 

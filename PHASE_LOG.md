@@ -176,6 +176,19 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-015
 [PASS Feature F-015] Feature F-015 set to PASS (sha256=81a9cd2c13b16296809ca989868025e093afb694472aa4ff10d2a2015fa60edd).
 ```
 
+## Phase P9: Dashboard, watchdog, auto-start (F-016)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-016
+........................................................................ [ 86%]
+...........                                                              [100%]
+83 passed in 20.45s
+........................................................................ [ 86%]
+...........                                                              [100%]
+83 passed in 19.30s
+[PASS Feature F-016] Feature F-016 set to PASS (sha256=e0b1279273a1ade8d551ea14861f3dfff1f0a1cbda28311d71b6ce7aeecc1d36).
+```
+
+
 
 
 
