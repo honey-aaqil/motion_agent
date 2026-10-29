@@ -1,7 +1,7 @@
 """Core pipeline entrypoint, NTFS crash-safe file replacement, and P0 spikes."""
 from __future__ import annotations
 
-import ctypes, hashlib, json, math, os, random, re, sqlite3, subprocess, threading, time, unicodedata, urllib.error, urllib.request, wave
+import copy, ctypes, hashlib, json, math, os, random, re, sqlite3, subprocess, threading, time, unicodedata, urllib.error, urllib.request, wave
 from ctypes import wintypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -825,6 +825,24 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         o_res = run_watchdog_observer(work_dir / f"{project_id}.db", work_dir / "status.html")
         dw_result = {"status": "READY", "health": h_info, "dashboard_html_len": len(d_html), "conditions": w_conds, "dead_man": d_ms, "task_cmd": a_cmd, "observer": o_res}
 
+    ed_result = None
+    if payload.get("run_editor_ops"):
+        b_info = check_editor_browser_support(payload.get("user_agent", "Mozilla Chrome/120.0 Safari"))
+        base_sc = {"scene_id": "S01", "template_id": "title_slam", "slots": {"title": {"text": "Original Title", "font": "Inter", "color": "#FFFFFF"}}}
+        app_sc = apply_slot_overrides(base_sc, {"title": {"text": "Edited Title"}}, language="en")
+        asset_sc = replace_scene_asset(app_sc, "logo", {"asset_id": "logo1", "license": "cc0"}, is_user_upload=False)
+        t_line = edit_scene_timeline([asset_sc], "duplicate", "S01")
+        _ = edit_scene_timeline(t_line, "trim", "S01", duration=4.5)
+        _ = edit_scene_timeline(t_line, "reorder", "S01", target_index=1)
+        _ = edit_scene_timeline(t_line, "delete", "S01_copy")
+        r_gen = prepare_scene_regeneration(app_sc, {"title": {"text": "Edited Title"}}, "Make punchy")
+        c_key = compute_rerender_cache_key(app_sc, app_sc.get("overrides"), "audio_hash_123", "16:9", "en", "default")
+        ed_gates = evaluate_editor_gates(app_sc)
+        conn = init_database(work_dir / f"{project_id}.db")
+        try: ev_id = record_editor_event(conn, "S01", "autofix_accept", pre_edit_validator_warn=True)
+        finally: conn.close()
+        ed_result = {"status": "READY", "browser": b_info, "cache_key": c_key, "timeline_count": len(t_line), "event_id": ev_id, "regen": r_gen, "gates": ed_gates}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -865,6 +883,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["eval_harness"] = eval_result
     if dw_result is not None:
         ret["dashboard_watchdog"] = dw_result
+    if ed_result is not None:
+        ret["editor_ops"] = ed_result
     return ret
 
 
@@ -1707,11 +1727,108 @@ def run_watchdog_observer(db_path: Path | str, out_html_path: Path | str, alert_
     return {"status": "OK", "conditions_detected": alerts, "alerts_sent": alerts_sent, "status_html": str(out_p)}
 
 
+def check_editor_browser_support(user_agent: str) -> dict[str, Any]:
+    if not isinstance(user_agent, str): raise TypeError("user_agent must be a string")
+    ua = user_agent.lower()
+    is_ch = ("chrome" in ua or "chromium" in ua or "edg/" in ua) and ("firefox" not in ua)
+    return {"supported": is_ch, "is_chromium": is_ch, "warning": None if is_ch else "Warning: Browser is not Chromium-based. Studio features may have layout inconsistencies."}
 
+def apply_slot_overrides(scene_spec: dict[str, Any], overrides: dict[str, Any], language: str = "en", font_whitelist: list[str] | None = None, color_palette: list[str] | None = None) -> dict[str, Any]:
+    if not isinstance(scene_spec, dict) or not isinstance(overrides, dict) or not isinstance(language, str): raise TypeError("Invalid types for apply_slot_overrides")
+    allowed_fonts, hex_pat = [f.lower() for f in (font_whitelist or ["Inter", "Roboto", "Montserrat", "Poppins", "Open Sans", "Arial"])], re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+    for ov in overrides.values():
+        if not isinstance(ov, dict): raise TypeError("Slot override must be a dict")
+        if "font" in ov and str(ov["font"]).lower() not in allowed_fonts: raise ValueError(f"Font '{ov['font']}' is not in preset font list")
+        if "color" in ov:
+            c = str(ov["color"]).strip()
+            if (color_palette and c not in color_palette) or (not color_palette and not hex_pat.match(c)): raise ValueError(f"Color '{c}' invalid")
+    updated, slots = copy.deepcopy(scene_spec), copy.deepcopy(scene_spec.get("slots", {}))
+    cur_ovs, is_en = copy.deepcopy(updated.get("overrides", {})), language.lower() in ("en", "english")
+    for s_name, ov in overrides.items():
+        cur_ovs[s_name] = {**cur_ovs.get(s_name, {}), **ov}
+        if s_name in slots:
+            if isinstance(slots[s_name], dict):
+                slots[s_name] = {**slots[s_name], **ov}
+                if is_en: slots[s_name]["applies_all_languages"] = True
+            elif "text" in ov: slots[s_name] = ov["text"]
+    updated["slots"], updated["overrides"] = slots, cur_ovs
+    return updated
 
+def replace_scene_asset(scene_spec: dict[str, Any], slot_name: str, new_asset: dict[str, Any], is_user_upload: bool = False) -> dict[str, Any]:
+    if not isinstance(scene_spec, dict) or not isinstance(slot_name, str) or not isinstance(new_asset, dict) or not isinstance(is_user_upload, bool): raise TypeError("Invalid types for replace_scene_asset")
+    if not slot_name.strip(): raise ValueError("slot_name must be a non-empty string")
+    updated, asset_rec = copy.deepcopy(scene_spec), copy.deepcopy(new_asset)
+    if is_user_upload:
+        asset_rec["provenance"], asset_rec["license"], asset_rec["safe_commercial"] = "user-supplied", "user_supplied", True
+    else:
+        lic = str(asset_rec.get("license", "")).lower()
+        if lic in ("editorial_only", "restricted"): raise ValueError(f"License '{lic}' is not safe for commercial use")
+        asset_rec["provenance"] = asset_rec.get("provenance", "safe_license_search")
+    slots, cur_ovs = copy.deepcopy(updated.get("slots", {})), copy.deepcopy(updated.get("overrides", {}))
+    slots[slot_name], cur_ovs[slot_name] = asset_rec, {"asset": asset_rec}
+    updated["slots"], updated["overrides"] = slots, cur_ovs
+    return updated
 
+def edit_scene_timeline(scenes: list[dict[str, Any]], action: str, scene_id: str, **kwargs: Any) -> list[dict[str, Any]]:
+    if not isinstance(scenes, list) or not isinstance(action, str) or not isinstance(scene_id, str): raise TypeError("Invalid types for edit_scene_timeline")
+    valid_actions = {"trim", "reorder", "duplicate", "delete"}
+    if action not in valid_actions: raise ValueError(f"action '{action}' must be one of {valid_actions}")
+    idx = next((i for i, s in enumerate(scenes) if s.get("scene_id") == scene_id), None)
+    if idx is None: raise ValueError(f"scene_id '{scene_id}' not found in timeline")
+    new_scenes = [copy.deepcopy(s) for s in scenes]
+    if action == "delete": new_scenes.pop(idx)
+    elif action == "duplicate":
+        dup = copy.deepcopy(new_scenes[idx])
+        dup["scene_id"], dup["needs_audio"], dup["audio_source"] = f"{dup.get('scene_id')}_copy", True, dup.get("audio_source", dup.get("audio_path"))
+        new_scenes.insert(idx + 1, dup)
+    elif action == "trim":
+        dur = kwargs.get("duration")
+        if dur is None or not isinstance(dur, (int, float)) or dur <= 0: raise ValueError("Trim duration must be positive number")
+        new_scenes[idx]["duration_sec"] = new_scenes[idx]["audio_duration_sec"] = float(dur)
+    elif action == "reorder":
+        t_idx = kwargs.get("target_index")
+        if t_idx is None or not isinstance(t_idx, int) or t_idx < 0 or t_idx >= len(new_scenes): raise ValueError("target_index out of range")
+        new_scenes.insert(t_idx, new_scenes.pop(idx))
+    for i, sc in enumerate(new_scenes): sc["scene_index"] = i + 1
+    return new_scenes
 
+def prepare_scene_regeneration(scene_spec: dict[str, Any], overrides: dict[str, Any] | None = None, prompt: str = "") -> dict[str, Any]:
+    if not isinstance(scene_spec, dict) or not isinstance(prompt, str): raise TypeError("Invalid types for prepare_scene_regeneration")
+    if overrides is not None and not isinstance(overrides, dict): raise TypeError("overrides must be dict or None")
+    if not prompt.strip(): raise ValueError("prompt must be a non-empty string")
+    pres_ovs = copy.deepcopy(overrides if overrides is not None else scene_spec.get("overrides", {}))
+    spec_json = json.dumps({"scene_id": scene_spec.get("scene_id"), "template_id": scene_spec.get("template_id"), "slots": scene_spec.get("slots", {})}, sort_keys=True)
+    return {"prompt": prompt.strip(), "scene_spec_json": spec_json, "slot_contract": {k: type(v).__name__ for k, v in scene_spec.get("slots", {}).items()}, "preserved_overrides": pres_ovs, "status": "PENDING_USER_REVIEW"}
 
+def compute_rerender_cache_key(scene_spec: dict[str, Any], overrides: dict[str, Any] | None, audio_hash: str, ratio: str, language: str, preset: str) -> str:
+    if not isinstance(scene_spec, dict) or not isinstance(audio_hash, str) or not isinstance(ratio, str) or not isinstance(language, str) or not isinstance(preset, str): raise TypeError("Invalid types for compute_rerender_cache_key")
+    if overrides is not None and not isinstance(overrides, dict): raise TypeError("overrides must be dict or None")
+    return hashlib.sha256(json.dumps({"scene_spec": scene_spec, "overrides": overrides or {}, "audio_hash": audio_hash, "ratio": ratio, "language": language, "preset": preset}, sort_keys=True).encode("utf-8")).hexdigest()
 
+def evaluate_editor_gates(scene_spec: dict[str, Any], overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(scene_spec, dict): raise TypeError("scene_spec must be dict")
+    if overrides is not None and not isinstance(overrides, dict): raise TypeError("overrides must be dict or None")
+    merged, warns, fixes = apply_slot_overrides(scene_spec, overrides or {}), [], {}
+    for ratio in ["16:9", "9:16"]:
+        for s_name, s_val in merged.get("slots", {}).items():
+            txt = s_val.get("text") if isinstance(s_val, dict) else str(s_val)
+            if ratio == "9:16" and len(txt) > 40:
+                warns.append(f"Slot '{s_name}' text may overflow in 9:16 ratio ({len(txt)} chars)")
+                fixes[s_name] = {"text": txt[:37] + "..."}
+    return {"scene_id": merged.get("scene_id", "S01"), "ratios_checked": ["16:9", "9:16"], "warnings": warns, "has_warnings": len(warns) > 0, "fix_automatically_available": len(fixes) > 0, "fix_suggestions": fixes}
+
+def record_editor_event(conn: sqlite3.Connection, scene_id: str, action_type: str, pre_edit_validator_warn: bool = False, pre_edit_cv_warn: bool = False, token_levenshtein_pct: float = 0.0, anchor_unchanged: bool = True, is_clean_quality_pair: bool | None = None) -> int:
+    if not isinstance(conn, sqlite3.Connection): raise TypeError("conn must be sqlite3.Connection")
+    if not isinstance(scene_id, str): raise TypeError("scene_id must be str")
+    if not scene_id.strip(): raise ValueError("scene_id must be non-empty")
+    if not isinstance(action_type, str): raise TypeError("action_type must be str")
+    if action_type not in {"autofix_accept", "autofix_reject", "regen_same_prompt", "text_edit", "asset_swap"}: raise ValueError(f"action_type '{action_type}' invalid")
+    if not isinstance(pre_edit_validator_warn, bool) or not isinstance(pre_edit_cv_warn, bool): raise TypeError("warnings must be bool")
+    if not isinstance(token_levenshtein_pct, (int, float)): raise TypeError("token_levenshtein_pct must be float")
+    if not isinstance(anchor_unchanged, bool): raise TypeError("anchor_unchanged must be bool")
+    clean = (1 if (action_type in ("autofix_accept", "autofix_reject", "regen_same_prompt") or (action_type == "text_edit" and (pre_edit_validator_warn or pre_edit_cv_warn))) else 0) if is_clean_quality_pair is None else (1 if is_clean_quality_pair else 0)
+    cur = conn.execute("INSERT INTO editor_events (scene_id, action_type, pre_edit_validator_warn, pre_edit_cv_warn, token_levenshtein_pct, anchor_unchanged, is_clean_quality_pair, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (scene_id, action_type, 1 if pre_edit_validator_warn else 0, 1 if pre_edit_cv_warn else 0, float(token_levenshtein_pct), 1 if anchor_unchanged else 0, clean, time.time()))
+    conn.commit()
+    return int(cur.lastrowid or 0)
 
 
