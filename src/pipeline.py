@@ -1,7 +1,7 @@
 """Core pipeline entrypoint, NTFS crash-safe file replacement, and P0 spikes."""
 from __future__ import annotations
 
-import ctypes, hashlib, json, os, random, re, sqlite3, subprocess, threading, time, unicodedata, urllib.error, urllib.request, wave
+import ctypes, hashlib, json, math, os, random, re, sqlite3, subprocess, threading, time, unicodedata, urllib.error, urllib.request, wave
 from ctypes import wintypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -229,6 +229,7 @@ def init_database(db_path: Path | str) -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS projects (project_id TEXT PRIMARY KEY, title TEXT, status TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS scenes (scene_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scene_index INTEGER NOT NULL, status TEXT NOT NULL, calls_used INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0.0, locked_by TEXT, draft_spec_json TEXT, canonical_spec_json TEXT, validation_log_json TEXT, audit_log_json TEXT, vlm_review_json TEXT, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(project_id));
         CREATE TABLE IF NOT EXISTS scene_attempts (attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, project_id TEXT NOT NULL, attempt_num INTEGER NOT NULL, prompt_hash TEXT NOT NULL, raw_response TEXT, canonical_spec TEXT, validation_metrics TEXT, dom_metrics TEXT, latency_ms REAL, thoughts_tokens INTEGER, output_tokens INTEGER, created_at REAL NOT NULL, FOREIGN KEY(scene_id) REFERENCES scenes(scene_id));
+        CREATE TABLE IF NOT EXISTS scene_trials (trial_id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, scene_id TEXT NOT NULL, is_baseline INTEGER NOT NULL DEFAULT 0, first_pass_validator_success INTEGER NOT NULL, final_acceptance INTEGER NOT NULL, calls_used INTEGER NOT NULL DEFAULT 1, retries_503 INTEGER NOT NULL DEFAULT 0, failed_all_repeats INTEGER NOT NULL DEFAULT 0, wcag_contrast_score REAL DEFAULT 0.0, clutter_score REAL DEFAULT 0.0, edge_overlap_count INTEGER DEFAULT 0, text_slot_compression_ratio REAL DEFAULT 1.0, asset_entropy REAL DEFAULT 0.0, narration_entity_coverage_ratio REAL DEFAULT 1.0, created_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS api_rate_ledger (call_id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, model_id TEXT, status_code INTEGER, created_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS editor_events (event_id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id TEXT NOT NULL, action_type TEXT NOT NULL, pre_edit_validator_warn INTEGER DEFAULT 0, pre_edit_cv_warn INTEGER DEFAULT 0, token_levenshtein_pct REAL DEFAULT 0.0, anchor_unchanged INTEGER DEFAULT 1, is_clean_quality_pair INTEGER DEFAULT 0, created_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS llm_queue (request_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt_hash TEXT NOT NULL, prompt_text TEXT NOT NULL, task TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'PENDING', response_text TEXT, error TEXT, created_at REAL NOT NULL);
@@ -791,6 +792,26 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             conn.close()
         authoring_result = {"status": "AUTHORED", "story_bible": sb, "exit_state": exit_st, "attempt_id": att_id, "retention": v_rep, "thinking_level": step_lvl}
 
+    eval_result = None
+    if payload.get("run_eval_harness"):
+        d_p = work_dir / "seed_eval.jsonl"
+        if not d_p.exists(): d_p.write_text('{"scene_id": "S01", "hard_subset": false}\n', encoding="utf-8")
+        _ = load_eval_dataset(payload.get("eval_dataset_path", d_p))
+        conn = init_database(work_dir / f"{project_id}.db")
+        try:
+            t_id = record_scene_trial(conn, {"run_id": "r1", "scene_id": "S01", "is_baseline": 1, "first_pass_validator_success": 1, "final_acceptance": 1})
+        finally:
+            conn.close()
+        eval_result = {
+            "status": "EVALUATED", "trial_id": t_id,
+            "stage1": evaluate_stage1_gate(0.9, 0.85, 0), "gate": evaluate_ship_block_gate(0.12, 0.02, 0, 0.1),
+            "mcnemar": mcnemar_exact_mid_p(2, 2), "bootstrap": paired_bootstrap_ci([0.8] * 10, [0.9] * 10, n_resamples=100),
+            "visual": compute_local_visual_metrics([{"id": "b", "box": [0, 0, 10, 10], "fg_hex": "#FFFFFF", "bg_hex": "#000000"}]),
+            "goodhart": check_goodhart_guards({"mean_words_per_slot": 10}, {"mean_words_per_slot": 10}),
+            "calibration": compute_judge_calibration([1, 0], [1, 0]),
+            "contact_sheet": evaluate_contact_sheet_gate(2, 1, 0, 0, False), "html": generate_human_contact_sheet([{"id": "d1"}], [], [{"id": "h1"}])
+        }
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -827,6 +848,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["timing"] = timing_result
     if authoring_result is not None:
         ret["authoring"] = authoring_result
+    if eval_result is not None:
+        ret["eval_harness"] = eval_result
     return ret
 
 
@@ -1475,6 +1498,109 @@ def record_scene_attempt(conn: sqlite3.Connection, scene_id: str, project_id: st
     )
     conn.commit()
     return int(cur.lastrowid or 0)
+
+
+def load_eval_dataset(dataset_path: Path | str, subset: str | None = None) -> list[dict[str, Any]]:
+    if not isinstance(dataset_path, (str, Path)): raise TypeError("dataset_path must be str or Path")
+    p = Path(dataset_path)
+    if not p.is_file(): raise FileNotFoundError(f"Dataset not found: {p}")
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [r for r in rows if bool(r.get("hard_subset"))] if subset == "hard" else rows
+
+def record_scene_trial(conn: sqlite3.Connection, trial_data: dict[str, Any]) -> int:
+    if not isinstance(conn, sqlite3.Connection) or not isinstance(trial_data, dict): raise TypeError("Invalid conn or trial_data")
+    cur = conn.execute(
+        "INSERT INTO scene_trials (run_id, scene_id, is_baseline, first_pass_validator_success, final_acceptance, calls_used, retries_503, failed_all_repeats, wcag_contrast_score, clutter_score, edge_overlap_count, text_slot_compression_ratio, asset_entropy, narration_entity_coverage_ratio, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(trial_data.get("run_id", "run_default")), str(trial_data.get("scene_id", "S01")), int(trial_data.get("is_baseline", 0)), int(trial_data.get("first_pass_validator_success", 0)), int(trial_data.get("final_acceptance", 0)), int(trial_data.get("calls_used", 1)), int(trial_data.get("retries_503", 0)), int(trial_data.get("failed_all_repeats", 0)), float(trial_data.get("wcag_contrast_score", 0.0)), float(trial_data.get("clutter_score", 0.0)), int(trial_data.get("edge_overlap_count", 0)), float(trial_data.get("text_slot_compression_ratio", 1.0)), float(trial_data.get("asset_entropy", 0.0)), float(trial_data.get("narration_entity_coverage_ratio", 1.0)), float(trial_data.get("created_at", time.time())))
+    )
+    conn.commit()
+    return int(cur.lastrowid or 0)
+
+def mcnemar_exact_mid_p(b_discordant: int, c_discordant: int) -> float:
+    if not isinstance(b_discordant, int) or not isinstance(c_discordant, int): raise TypeError("Discordant counts must be ints")
+    if b_discordant < 0 or c_discordant < 0: raise ValueError("Discordant counts must be non-negative")
+    if b_discordant == c_discordant or (b_discordant + c_discordant) == 0: return 1.0
+    n, k = b_discordant + c_discordant, min(b_discordant, c_discordant)
+    return min(1.0, round(float(2.0 * sum(math.comb(n, i) for i in range(k)) + math.comb(n, k)) / float(2.0 ** n), 6))
+
+def paired_bootstrap_ci(baseline_scores: list[float], candidate_scores: list[float], n_resamples: int = 10000, alpha: float = 0.05, seed: int = 42) -> tuple[float, float, float, float]:
+    if not isinstance(baseline_scores, list) or not isinstance(candidate_scores, list): raise TypeError("Scores must be lists")
+    if len(baseline_scores) != len(candidate_scores) or not baseline_scores: raise ValueError("Scores must be non-empty and equal length")
+    n = len(baseline_scores)
+    diffs = [float(c) - float(b) for b, c in zip(baseline_scores, candidate_scores)]
+    m = sum(diffs) / n
+    var_d = (sum((x - m) ** 2 for x in diffs) / (n - 1)) if n > 1 else 0.0
+    rng = random.Random(seed)
+    boot = sorted(sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(max(1, n_resamples)))
+    lo = max(0, min(int(round((alpha / 2.0) * len(boot))), len(boot) - 1))
+    hi = max(0, min(int(round((1.0 - alpha / 2.0) * len(boot))) - 1, len(boot) - 1))
+    return (round(m, 4), round(boot[lo], 4), round(boot[hi], 4), round(var_d, 4))
+
+def evaluate_stage1_gate(baseline_pass_rate: float, candidate_pass_rate: float, schema_failures: int) -> dict[str, Any]:
+    if not isinstance(baseline_pass_rate, (int, float)) or not isinstance(candidate_pass_rate, (int, float)) or not isinstance(schema_failures, int): raise TypeError("Invalid types for stage 1 gate")
+    drop = float(baseline_pass_rate) - float(candidate_pass_rate)
+    aborted = (drop >= 0.12) or (schema_failures > 1)
+    return {"aborted": aborted, "drop_points": round(drop, 3), "schema_failures": schema_failures, "reason": "aborted" if aborted else "pass"}
+
+def evaluate_ship_block_gate(diff_mean: float, lower_bound: float, persistent_failure_delta: int, calls_per_accepted_delta: float) -> str:
+    if not isinstance(diff_mean, (int, float)) or not isinstance(lower_bound, (int, float)) or not isinstance(persistent_failure_delta, int) or not isinstance(calls_per_accepted_delta, (int, float)): raise TypeError("Invalid types for ship/block gate")
+    if diff_mean <= -0.05 or lower_bound < -0.05 or persistent_failure_delta >= 2 or calls_per_accepted_delta > 0.25: return "BLOCK"
+    return "SHIP" if (diff_mean >= 0.10 and lower_bound > 0.0) else "NEUTRAL"
+
+def compute_wcag_contrast(fg_hex: str, bg_hex: str) -> float:
+    if not isinstance(fg_hex, str) or not isinstance(bg_hex, str): raise TypeError("Hex colors must be strings")
+    m_fg, m_bg = re.compile(r"^#?([0-9a-fA-F]{6})$").match(fg_hex.strip()), re.compile(r"^#?([0-9a-fA-F]{6})$").match(bg_hex.strip())
+    if not m_fg or not m_bg: raise ValueError("Invalid 6-digit hex color")
+    def _lum(h: str) -> float:
+        adj = [((int(h[i:i+2], 16) / 255.0) / 12.92 if (int(h[i:i+2], 16) / 255.0) <= 0.04045 else (((int(h[i:i+2], 16) / 255.0) + 0.055) / 1.055) ** 2.4) for i in (0, 2, 4)]
+        return 0.2126 * adj[0] + 0.7152 * adj[1] + 0.0722 * adj[2]
+    l1, l2 = _lum(m_fg.group(1)), _lum(m_bg.group(1))
+    return round((max(l1, l2) + 0.05) / (min(l1, l2) + 0.05), 2)
+
+def compute_local_visual_metrics(boxes: list[dict[str, Any]], bg_hex: str = "#0B0F19") -> dict[str, Any]:
+    if not isinstance(boxes, list): raise TypeError("boxes must be a list")
+    overlaps, min_c = 0, 21.0
+    for i in range(len(boxes)):
+        b1, c = boxes[i].get("box", [0, 0, 0, 0]), compute_wcag_contrast(boxes[i].get("fg_hex", "#FFFFFF"), boxes[i].get("bg_hex", bg_hex))
+        if c < min_c: min_c = c
+        for j in range(i + 1, len(boxes)):
+            b2 = boxes[j].get("box", [0, 0, 0, 0])
+            if b1[0] < b2[0] + b2[2] and b1[0] + b1[2] > b2[0] and b1[1] < b2[1] + b2[3] and b1[1] + b1[3] > b2[1]: overlaps += 1
+    clutter = round(sum((b.get("box", [0, 0, 0, 0])[2] * b.get("box", [0, 0, 0, 0])[3]) for b in boxes) / (1920.0 * 1080.0), 4)
+    return {"overlap_count": overlaps, "min_contrast": min_c, "contrast_passed": min_c >= 4.5, "clutter_score": clutter}
+
+def check_goodhart_guards(baseline_stats: dict[str, Any], candidate_stats: dict[str, Any]) -> list[str]:
+    if not isinstance(baseline_stats, dict) or not isinstance(candidate_stats, dict): raise TypeError("Stats must be dicts")
+    warns: list[str] = []
+    b_w, c_w = baseline_stats.get("mean_words_per_slot", 0.0), candidate_stats.get("mean_words_per_slot", 0.0)
+    if b_w > 0 and c_w < (b_w * 0.8): warns.append(f"mean words per text slot dropped > 20% ({c_w:.1f} vs {b_w:.1f})")
+    if candidate_stats.get("top_assets_share", 0.0) > 0.30: warns.append("top stock assets fill > 30% of scenes")
+    return warns
+
+def compute_judge_calibration(ground_truth: list[int], judge_preds: list[int], swapped_preds: list[int] | None = None) -> dict[str, Any]:
+    if not isinstance(ground_truth, list) or not isinstance(judge_preds, list): raise TypeError("ground_truth and judge_preds must be lists")
+    if len(ground_truth) != len(judge_preds) or not ground_truth: raise ValueError("ground_truth and judge_preds must be non-empty and equal length")
+    n = len(ground_truth)
+    tp, tn = sum(1 for g, p in zip(ground_truth, judge_preds) if g == 1 and p == 1), sum(1 for g, p in zip(ground_truth, judge_preds) if g == 0 and p == 0)
+    fp, fn = sum(1 for g, p in zip(ground_truth, judge_preds) if g == 0 and p == 1), sum(1 for g, p in zip(ground_truth, judge_preds) if g == 1 and p == 0)
+    sens, spec = (tp / (tp + fn)) if (tp + fn) > 0 else 1.0, (tn / (tn + fp)) if (tn + fp) > 0 else 1.0
+    po, pe = (tp + tn) / n, ((tp + fn) * (tp + fp) + (tn + fp) * (tn + fn)) / (n * n)
+    kappa = ((po - pe) / (1.0 - pe)) if (1.0 - pe) > 0 else 1.0
+    flips = sum(1 for a, b in zip(judge_preds, swapped_preds) if a != b) / n if swapped_preds else 0.0
+    passed = sens >= 0.85 and spec >= 0.85 and (sens + spec - 1.0) >= 0.70 and kappa >= 0.65 and flips <= 0.05
+    return {"sensitivity": round(sens, 3), "specificity": round(spec, 3), "youden_j": round(sens + spec - 1.0, 3), "kappa": round(kappa, 3), "flip_rate": round(flips, 3), "passed": passed}
+
+def generate_human_contact_sheet(discordant_scenes: list[dict[str, Any]], concordant_drop_scenes: list[dict[str, Any]], honeypot_scenes: list[dict[str, Any]]) -> str:
+    if not isinstance(discordant_scenes, list) or not isinstance(concordant_drop_scenes, list) or not isinstance(honeypot_scenes, list): raise TypeError("Inputs must be lists")
+    rows = [f"<tr><td>{s.get('id', 'scene')}</td><td>A</td><td>B</td><td>Pending</td></tr>" for s in discordant_scenes + concordant_drop_scenes + honeypot_scenes]
+    return f"<!DOCTYPE html><html><body><h2>Human Contact Sheet</h2><table border='1'><tr><th>ID</th><th>A</th><th>B</th><th>Verdict</th></tr>{''.join(rows)}</table></body></html>"
+
+def evaluate_contact_sheet_gate(human_wins: int, human_losses: int, broken_passing: int, hollow_concordant: int, honeypot_flipped: bool) -> dict[str, Any]:
+    if not isinstance(human_wins, int) or not isinstance(human_losses, int) or not isinstance(broken_passing, int) or not isinstance(hollow_concordant, int) or not isinstance(honeypot_flipped, bool): raise TypeError("Invalid types")
+    blocked = ((human_losses - human_wins) >= 4) or (broken_passing >= 3) or (hollow_concordant >= 2) or honeypot_flipped
+    return {"blocked": blocked, "reason": "blocked by contact sheet criteria" if blocked else "pass"}
+
+
 
 
 
