@@ -188,6 +188,18 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-016
 [PASS Feature F-016] Feature F-016 set to PASS (sha256=e0b1279273a1ade8d551ea14861f3dfff1f0a1cbda28311d71b6ce7aeecc1d36).
 ```
 
+## Phase P10: Editor, overrides, editor_events (F-017)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-017
+........................................................................ [ 81%]
+................                                                         [100%]
+88 passed in 23.74s
+........................................................................ [ 81%]
+................                                                         [100%]
+88 passed in 20.36s
+[PASS Feature F-017] Feature F-017 set to PASS (sha256=e6e3cfcdf1791e5b19a44a6cfed6b7a3a94acc581ac57af918b2bd81724e6515).
+```
+
 
 
 
