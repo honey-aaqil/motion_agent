@@ -1,6 +1,6 @@
 # 1. PACKET_HEADER
-task_id: F-011            stage: REVIEW
-date: 2026-10-28          tool: Antigravity
+task_id: F-012            stage: REVIEW
+date: 2026-10-29          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
 - Max 2 LLM calls per scene; 503/429 never consume a call.
@@ -12,13 +12,13 @@ date: 2026-10-28          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Sacred VO normalization preserving NFC/ZWJ/ZWNJ and converting CRLF (`normalize_sacred_vo`), deterministic two-column AV script parser extracting scenes/timecodes/directions/onscreen-text/VO/music/SFX/style and detecting uncertain lines (`parse_av_script`), VO round-trip reconstructor (`rebuild_vo_text`), Audio Pack generator with TTS directions, durations, music prompts (no vocals, loopable, margin) and SFX list (`generate_audio_pack`), and atomic filesystem exporter (`export_audio_pack`), wired directly into `run_pipeline`
-- `tests\regression\test_f011_parser_audio_pack.py`: Regression tests for parameter validation, explicit errors on invalid inputs, NFC/ZWJ/ZWNJ preservation, byte-exact VO round trip, Appendix A fixture parsing, uncertain line flagging, and Audio Pack export
-- `PHASE_LOG.md`: Phase P4 (F-011) terminal output recorded
+- `src\pipeline.py`: License filter accepting CC0, PD, CC-BY (with attribution), Pexels, Pixabay, Unsplash, Mixkit, Coverr, OFL, MIT, ISC, Apache-2.0 and silently rejecting NC, ND, ShareAlike, editorial-only, watermarked, and unknown licenses (`filter_asset_license`); Action-needed detector for risky user uploads, endorsement risks, and slots with no safe alternatives (`detect_action_needed`); AssetLedger manager for asset CRUD and atomic JSON export (`AssetLedger`); Ready-to-paste markdown attribution generator (`generate_credits_markdown`); SHA-256 hash-cached background removal with rembg fallback (`remove_background_cached`), wired directly into `run_pipeline`
+- `tests\regression\test_f012_assets_and_ledger.py`: Regression tests for license filtering contracts and acceptance/silent rejections, action-needed warnings, asset ledger CRUD and atomic export, credits markdown generation, background removal caching by sha256 hash, and full pipeline wiring
+- `PHASE_LOG.md`: Phase P5 (F-012) terminal output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-011
-result: passed=57 failed=0   report_sha256: a7d444edda2e89c6447b90ecd9bad6adc3a70bdd3c2b5d3eee14d58e00ca08e9   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-012
+result: passed=63 failed=0   report_sha256: e497511d04e1a02507e142ec383634fb58fded6160b916dfbf842e8d3423ddac   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,4 +30,5 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-012 (Phase P5): Assets, ledger, license filter (SPEC Section 10).
+  Start Feature F-013 (Phase P6): Timing and sentence anchors (SPEC Section 3).
+

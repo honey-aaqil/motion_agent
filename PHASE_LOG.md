@@ -134,3 +134,14 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-011
 [PASS Feature F-011] Feature F-011 set to PASS (sha256=a7d444edda2e89c6447b90ecd9bad6adc3a70bdd3c2b5d3eee14d58e00ca08e9).
 ```
 
+## Phase P5: Assets, ledger, license filter (F-012)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-012
+...............................................................          [100%]
+63 passed in 22.60s
+...............................................................          [100%]
+63 passed in 18.98s
+[PASS Feature F-012] Feature F-012 set to PASS (sha256=e497511d04e1a02507e142ec383634fb58fded6160b916dfbf842e8d3423ddac).
+```
+
+
