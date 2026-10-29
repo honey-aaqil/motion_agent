@@ -1,7 +1,7 @@
 """Core pipeline entrypoint, NTFS crash-safe file replacement, and P0 spikes."""
 from __future__ import annotations
 
-import ctypes, hashlib, json, os, random, re, sqlite3, threading, time, unicodedata, urllib.error, urllib.request
+import ctypes, hashlib, json, os, random, re, sqlite3, subprocess, threading, time, unicodedata, urllib.error, urllib.request, wave
 from ctypes import wintypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -757,6 +757,19 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         bg_res = remove_background_cached(bg_sample, project_root / "cache" / "rembg")
         al_result = {"status": "READY", "total_assets": len(ledger.list_assets()), "action_needed": actions, "ledger_path": str(ledger_path), "credits_path": str(c_path), "bg_removal": bg_res}
 
+    timing_result = None
+    if payload.get("run_timing"):
+        t_vo = str(payload.get("vo_text", "Sentence."))
+        t_dur = float(payload.get("audio_duration", 5.0))
+        t_lang = str(payload.get("lang", "en"))
+        up_res = validate_uploaded_audio_files(payload.get("uploaded_audio_files", ["S01.en.wav"]), payload.get("expected_scenes", ["S01"]), [t_lang])
+        align_res = align_sentence_anchors(t_vo, t_dur, whisper_segments=payload.get("whisper_segments"), silence_intervals=payload.get("silence_intervals"), lang=t_lang)
+        c_res = [{"id": c.get("id", "c"), "time": resolve_cue_timing(c.get("anchor", "@scene.start"), align_res["anchors"], align_res["scene_duration"])} for c in payload.get("cues", [])]
+        w_cmd = build_whisper_alignment_cmd(payload.get("audio_file", "S01.en.wav"), lang=t_lang)
+        m_dur = measure_audio_duration_ffprobe(payload["measure_audio_file"]) if payload.get("measure_audio_file") else t_dur
+        _ = compute_scene_timing(t_dur)
+        timing_result = {"status": "TIMED", "anchors": align_res["anchors"], "resolved_cues": c_res, "whisper_cmd": w_cmd, "measured_dur": m_dur, "upload_validation": up_res}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -789,6 +802,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["parser_audio_pack"] = pap_result
     if al_result is not None:
         ret["assets_and_ledger"] = al_result
+    if timing_result is not None:
+        ret["timing"] = timing_result
     return ret
 
 
@@ -1221,6 +1236,122 @@ def remove_background_cached(image_bytes: bytes, cache_dir: Path) -> dict[str, A
     tmp_file.write_bytes(processed)
     final_path = durable_replace(tmp_file, out_file)
     return {"sha256": h, "cached": False, "output_path": str(final_path), "bytes": processed}
+
+
+def validate_uploaded_audio_files(uploaded_files: list[str], expected_scenes: list[str], expected_langs: list[str] | None = None) -> dict[str, Any]:
+    if not isinstance(uploaded_files, list) or not isinstance(expected_scenes, list):
+        raise TypeError("uploaded_files and expected_scenes must be lists")
+    langs = [l.lower() for l in (expected_langs or ["en"])]
+    matched, found_keys, extra = [], set(), []
+    for f in uploaded_files:
+        info = validate_audio_filename(f)
+        sc_id, lk = f"S{info['scene_num']:02d}", info["lang"].lower()
+        if sc_id in expected_scenes and lk in langs:
+            matched.append({"file": f, "scene": sc_id, "lang": lk, "ext": info["ext"]})
+            found_keys.add(f"{sc_id}.{lk}")
+        else:
+            extra.append(f)
+    expected_keys = {f"{sc}.{l}" for sc in expected_scenes for l in langs}
+    missing = sorted(list(expected_keys - found_keys))
+    return {"valid": len(missing) == 0 and len(extra) == 0, "matched_files": matched, "missing_files": missing, "extra_files": extra}
+
+
+def measure_audio_duration_ffprobe(audio_file: Path | str) -> float:
+    if not isinstance(audio_file, (str, Path)):
+        raise TypeError("audio_file must be Path or string")
+    p = Path(audio_file)
+    if not p.is_file():
+        raise FileNotFoundError(f"Audio file not found: {p}")
+    if p.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(p), "rb") as wf:
+                return round(wf.getnframes() / float(wf.getframerate() or 1), 3)
+        except Exception:
+            pass
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(p)]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            return round(float(res.stdout.strip()), 3)
+    except Exception:
+        pass
+    return 0.0
+
+
+def compute_scene_timing(audio_duration: float, lead_in: float = 0.3, tail: float = 0.5) -> dict[str, float]:
+    if not isinstance(audio_duration, (int, float)) or not isinstance(lead_in, (int, float)) or not isinstance(tail, (int, float)):
+        raise TypeError("Timings must be numeric")
+    if audio_duration < 0:
+        raise ValueError("audio_duration cannot be negative")
+    if lead_in < 0 or tail < 0:
+        raise ValueError("Pads cannot be negative")
+    return {"audio_duration": float(audio_duration), "lead_in": float(lead_in), "tail": float(tail), "scene_duration": compute_scene_duration(audio_duration, lead_in, tail)}
+
+
+def align_sentence_anchors(vo_text: str, audio_duration: float, whisper_segments: list[dict[str, Any]] | None = None, silence_intervals: list[dict[str, float]] | None = None, lead_in: float = 0.3, tail: float = 0.5, lang: str = "en") -> dict[str, Any]:
+    if not isinstance(vo_text, str):
+        raise TypeError("vo_text must be a string")
+    if not isinstance(audio_duration, (int, float)):
+        raise TypeError("audio_duration must be numeric")
+    if audio_duration < 0:
+        raise ValueError("audio_duration cannot be negative")
+    if lang not in ("en", "hi", "ta"):
+        raise ValueError(f"Unsupported language '{lang}'. Must be one of en, hi, ta.")
+    sentences = split_sentences(normalize_vo_text(vo_text))
+    scene_dur = compute_scene_timing(audio_duration, lead_in, tail)["scene_duration"]
+    anchors = {"@scene.start": 0.0, "@scene.end": scene_dur}
+    conf_map = {"@scene.start": 1.0, "@scene.end": 1.0}
+    if len(sentences) == 1:
+        anchors["@s1.start"], anchors["@s1.end"] = round(lead_in, 3), round(lead_in + audio_duration, 3)
+        conf_map["@s1.start"] = conf_map["@s1.end"] = 1.0
+        return {"sentence_count": 1, "alignment_strategy": "single_sentence_no_alignment", "anchors": anchors, "confidence_map": conf_map, "has_low_confidence": False, "low_confidence_anchors": [], "scene_duration": scene_dur}
+    if whisper_segments and len(whisper_segments) == len(sentences):
+        for i, seg in enumerate(whisper_segments, start=1):
+            anchors[f"@s{i}.start"], anchors[f"@s{i}.end"] = round(lead_in + float(seg.get("start", 0.0)), 3), round(lead_in + float(seg.get("end", audio_duration)), 3)
+            conf_map[f"@s{i}.start"] = conf_map[f"@s{i}.end"] = 0.95
+        return {"sentence_count": len(sentences), "alignment_strategy": "whisper_exact_order", "anchors": anchors, "confidence_map": conf_map, "has_low_confidence": False, "low_confidence_anchors": [], "scene_duration": scene_dur}
+    tot_chars, curr, low_confs = sum(len(s) for s in sentences) or 1, 0.0, []
+    for i, s in enumerate(sentences, start=1):
+        target = curr + (len(s) / tot_chars) * audio_duration
+        if silence_intervals:
+            for sil in silence_intervals:
+                mid = (sil.get("start", 0.0) + sil.get("end", 0.0)) / 2.0
+                if abs(mid - target) <= 0.8:
+                    target = mid; break
+        end_val = min(audio_duration, max(curr + 0.3, target)) if i < len(sentences) else audio_duration
+        anchors[f"@s{i}.start"], anchors[f"@s{i}.end"] = round(lead_in + curr, 3), round(lead_in + end_val, 3)
+        conf = 0.65 if (silence_intervals or whisper_segments) else 0.50
+        conf_map[f"@s{i}.start"], conf_map[f"@s{i}.end"] = conf, conf
+        if conf < 0.70:
+            low_confs.extend([f"@s{i}.start", f"@s{i}.end"])
+        curr = end_val
+    return {"sentence_count": len(sentences), "alignment_strategy": "silence_proportional_fallback", "anchors": anchors, "confidence_map": conf_map, "has_low_confidence": len(low_confs) > 0, "low_confidence_anchors": low_confs, "scene_duration": scene_dur}
+
+
+def resolve_cue_timing(cue_anchor: str, anchors: dict[str, float], scene_duration: float) -> float:
+    if not isinstance(cue_anchor, str):
+        raise TypeError("cue_anchor must be a string")
+    cue_str = cue_anchor.strip()
+    if not cue_str.startswith("@"):
+        raise ValueError(f"Absolute timestamps in a cue are a validation error: '{cue_anchor}'")
+    m = re.match(r"^(@[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)(?:([+-])(\d+(?:\.\d+)?)s)?$", cue_str)
+    if not m:
+        raise ValueError(f"Invalid cue anchor syntax: '{cue_anchor}'")
+    base, sign, off_str = m.group(1), m.group(2), m.group(3)
+    if base not in anchors:
+        raise ValueError(f"Unknown anchor '{base}' in cue '{cue_anchor}'")
+    offset = (float(off_str) * (1.0 if sign == "+" else -1.0)) if (sign and off_str) else 0.0
+    return round(max(0.0, min(float(scene_duration), anchors[base] + offset)), 3)
+
+
+def build_whisper_alignment_cmd(audio_path: str | Path, model_name: str = "small", lang: str = "en", output_dir: str | Path = ".") -> list[str]:
+    if not audio_path or not str(audio_path).strip():
+        raise ValueError("audio_path cannot be empty")
+    if lang not in ("en", "hi", "ta") or model_name not in ("base", "small", "medium"):
+        raise ValueError(f"Unsupported lang '{lang}' or model '{model_name}'")
+    p = Path(audio_path)
+    return ["whisper-cli", "-m", f"models/ggml-{model_name}.bin", "-l", lang, "--output-json", "--output-file", str(Path(output_dir) / p.stem), "-f", str(p)]
+
 
 
 
