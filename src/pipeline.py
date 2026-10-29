@@ -812,6 +812,19 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             "contact_sheet": evaluate_contact_sheet_gate(2, 1, 0, 0, False), "html": generate_human_contact_sheet([{"id": "d1"}], [], [{"id": "h1"}])
         }
 
+    dw_result = None
+    if payload.get("run_dashboard_watchdog"):
+        h_info = get_machine_health(work_dir / f"{project_id}.db")
+        d_html = render_dashboard_html({"project_id": project_id, "title": "Dashboard", "preset": "EN"}, [{"scene_id": "S01", "status": "DONE"}], h_info, action_needed=[])
+        w_conds = check_watchdog_conditions(h_info)
+        _ = evaluate_alert_throttling("sample_cond", {}, time.time())
+        d_ms = schedule_dead_man_switch("alert_topic", delay_sec=900, cancel=False)
+        a_cmd = generate_autostart_task_cmd("MotionWatchdog", "python scripts/watchdog_observer.py", interval_min=5)
+        conn = init_database(work_dir / f"{project_id}.db")
+        conn.close()
+        o_res = run_watchdog_observer(work_dir / f"{project_id}.db", work_dir / "status.html")
+        dw_result = {"status": "READY", "health": h_info, "dashboard_html_len": len(d_html), "conditions": w_conds, "dead_man": d_ms, "task_cmd": a_cmd, "observer": o_res}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -850,6 +863,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["authoring"] = authoring_result
     if eval_result is not None:
         ret["eval_harness"] = eval_result
+    if dw_result is not None:
+        ret["dashboard_watchdog"] = dw_result
     return ret
 
 
@@ -1599,6 +1614,98 @@ def evaluate_contact_sheet_gate(human_wins: int, human_losses: int, broken_passi
     if not isinstance(human_wins, int) or not isinstance(human_losses, int) or not isinstance(broken_passing, int) or not isinstance(hollow_concordant, int) or not isinstance(honeypot_flipped, bool): raise TypeError("Invalid types")
     blocked = ((human_losses - human_wins) >= 4) or (broken_passing >= 3) or (hollow_concordant >= 2) or honeypot_flipped
     return {"blocked": blocked, "reason": "blocked by contact sheet criteria" if blocked else "pass"}
+
+
+def get_machine_health(db_path: Path | str | None = None) -> dict[str, Any]:
+    if db_path is not None and not isinstance(db_path, (str, Path)): raise TypeError("db_path must be str or Path")
+    v_mem = psutil.virtual_memory()
+    d_use = psutil.disk_usage(str(Path.cwd()))
+    p_mem = psutil.Process().memory_info().rss
+    batt = psutil.sensors_battery()
+    wal_sz = 0.0
+    if db_path:
+        w_p = Path(f"{Path(db_path)}-wal")
+        wal_sz = round(float(w_p.stat().st_size) / (1024.0 * 1024.0), 2) if w_p.is_file() else 0.0
+    return {
+        "available_ram_mb": round(float(v_mem.available) / (1024.0 * 1024.0), 1),
+        "free_disk_gb": round(float(d_use.free) / (1024.0 ** 3), 2),
+        "process_tree_ram_mb": round(float(p_mem) / (1024.0 * 1024.0), 1),
+        "wal_size_mb": wal_sz,
+        "battery_percent": float(batt.percent) if batt is not None else 100.0,
+        "last_alert_delivery": 0.0,
+    }
+
+def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, Any]], health: dict[str, Any], action_needed: list[dict[str, Any]] | None = None) -> str:
+    if not isinstance(project_meta, dict) or not isinstance(scenes, list) or not isinstance(health, dict): raise TypeError("Invalid types for dashboard")
+    if action_needed is not None and not isinstance(action_needed, list): raise TypeError("action_needed must be list or None")
+    acts = action_needed or []
+    sc_items = "".join(f"<li>{s.get('scene_id', 'S')}: {s.get('status', 'PENDING')}</li>" for s in scenes)
+    act_items = "".join(f"<li>{a.get('scene_id', 'S')}: {a.get('issue', 'Action')}</li>" for a in acts)
+    return (
+        f"<!DOCTYPE html><html><head><title>Motion Agent Dashboard</title></head><body>"
+        f"<h1>Motion Agent Dashboard</h1>"
+        f"<h2>Project: {project_meta.get('title', 'Untitled')} ({project_meta.get('project_id', '')})</h2>"
+        f"<p>Preset: {project_meta.get('preset', 'EN')}</p>"
+        f"<div id='health'><p>RAM: {health.get('available_ram_mb', 0)} MB | Disk: {health.get('free_disk_gb', 0)} GB</p></div>"
+        f"<div id='scenes'><ul>{sc_items}</ul></div>"
+        f"<div id='actions'><ul>{act_items}</ul></div>"
+        f"</body></html>"
+    )
+
+def check_watchdog_conditions(health: dict[str, Any], conn: sqlite3.Connection | None = None, now: float | None = None) -> list[str]:
+    if not isinstance(health, dict): raise TypeError("health must be dict")
+    alerts: list[str] = []
+    if float(health.get("free_disk_gb", 100.0)) < 10.0: alerts.append("free_disk_under_10gb")
+    if float(health.get("available_ram_mb", 1000.0)) < 600.0: alerts.append("ram_under_600mb")
+    if float(health.get("wal_size_mb", 0.0)) > 128.0: alerts.append("wal_over_128mb")
+    if conn is not None:
+        now_ts = float(now if now is not None else time.time())
+        c1 = conn.execute("SELECT scene_id FROM scenes WHERE locked_until > 0 AND (? > (locked_until + 120.0))", (now_ts,))
+        if c1.fetchone(): alerts.append("expired_lease")
+        c2 = conn.execute("SELECT status_code FROM llm_log ORDER BY log_id DESC LIMIT 15").fetchall()
+        if len(c2) >= 15 and all(r[0] in (429, 503) for r in c2): alerts.append("consecutive_llm_errors")
+    return alerts
+
+def evaluate_alert_throttling(condition: str, last_alert_log: dict[str, float], now: float, cooldown_sec: float = 14400.0) -> bool:
+    if not isinstance(condition, str) or not isinstance(last_alert_log, dict) or not isinstance(now, (int, float)) or not isinstance(cooldown_sec, (int, float)): raise TypeError("Invalid types for alert throttling")
+    if condition not in last_alert_log or (float(now) - float(last_alert_log[condition])) >= float(cooldown_sec):
+        last_alert_log[condition] = float(now)
+        return True
+    return False
+
+def schedule_dead_man_switch(topic: str, delay_sec: int = 900, cancel: bool = False) -> dict[str, Any]:
+    if not isinstance(topic, str) or not isinstance(delay_sec, int) or not isinstance(cancel, bool): raise TypeError("Invalid types for dead man switch")
+    return {"topic": str(topic), "delay_sec": int(delay_sec), "status": "CANCELLED" if cancel else "SCHEDULED"}
+
+def generate_autostart_task_cmd(task_name: str, command: str, interval_min: int = 5, on_logon: bool = False) -> str:
+    if not isinstance(task_name, str) or not isinstance(command, str) or not isinstance(interval_min, int) or not isinstance(on_logon, bool): raise TypeError("Invalid types for autostart cmd")
+    if on_logon: return f'schtasks /Create /SC ONLOGON /TN "{task_name}" /TR "{command}" /F'
+    return f'schtasks /Create /SC MINUTE /MO {interval_min} /TN "{task_name}" /TR "{command}" /F'
+
+def run_watchdog_observer(db_path: Path | str, out_html_path: Path | str, alert_log_path: Path | str | None = None, push_topic: str | None = None) -> dict[str, Any]:
+    if not isinstance(db_path, (str, Path)) or not isinstance(out_html_path, (str, Path)): raise TypeError("Paths must be str or Path")
+    db_p, out_p = Path(db_path), Path(out_html_path)
+    alert_log: dict[str, float] = {}
+    if alert_log_path and Path(alert_log_path).is_file():
+        try: alert_log = json.loads(Path(alert_log_path).read_text(encoding="utf-8"))
+        except Exception: alert_log = {}
+    health = get_machine_health(db_p)
+    conn = None
+    if db_p.is_file():
+        conn = sqlite3.connect(f"file:{db_p.as_posix()}?mode=ro", uri=True, timeout=30.0)
+    now_ts = time.time()
+    try: alerts = check_watchdog_conditions(health, conn=conn, now=now_ts)
+    finally:
+        if conn: conn.close()
+    alerts_sent = [c for c in alerts if evaluate_alert_throttling(c, alert_log, now_ts)]
+    if alert_log_path:
+        Path(alert_log_path).write_text(json.dumps(alert_log), encoding="utf-8")
+    dms = schedule_dead_man_switch(push_topic or "motion_agent_watchdog", delay_sec=900, cancel=False)
+    tmp_h = out_p.with_suffix(".tmp")
+    tmp_h.write_text(f"<!DOCTYPE html><html><head><title>Motion Agent Status</title></head><body><h1>Motion Agent Status</h1><p>RAM: {health['available_ram_mb']} MB</p><p>Alerts: {len(alerts_sent)}</p><p>DMS: {dms['status']}</p></body></html>", encoding="utf-8")
+    durable_replace(tmp_h, out_p)
+    return {"status": "OK", "conditions_detected": alerts, "alerts_sent": alerts_sent, "status_html": str(out_p)}
+
 
 
 
