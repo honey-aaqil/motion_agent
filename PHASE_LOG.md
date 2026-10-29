@@ -124,3 +124,13 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-010
 [PASS Feature F-010] Feature F-010 set to PASS (sha256=0aa73d384f0b59f93c9414db78df51abe45188df7cfcdd4407a2fadd3cdb460f).
 ```
 
+## Phase P4: Parser, VO round trip, Audio Pack (F-011)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-011
+.........................................................                [100%]
+57 passed in 22.77s
+.........................................................                [100%]
+57 passed in 19.60s
+[PASS Feature F-011] Feature F-011 set to PASS (sha256=a7d444edda2e89c6447b90ecd9bad6adc3a70bdd3c2b5d3eee14d58e00ca08e9).
+```
+
