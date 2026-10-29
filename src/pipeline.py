@@ -740,6 +740,23 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         exp_res = export_audio_pack(ap_res, project_root)
         pap_result = {"status": "PARSED_AND_PACKED", "parsed": parsed_res, "audio_pack": ap_res, "export": exp_res}
 
+    al_result = None
+    if payload.get("run_assets_and_ledger"):
+        ledger = AssetLedger()
+        for a in payload.get("assets", []):
+            rec = dict(a)
+            rec["status"] = filter_asset_license(a).get("status", "REJECTED")
+            ledger.add_asset(rec)
+        actions = detect_action_needed(ledger.list_assets(), slot_candidates=payload.get("slot_candidates"))
+        ledger_path = ledger.export_ledger(project_root)
+        credits_md = generate_credits_markdown(ledger.list_assets(), project_title=str(payload.get("project_id", "Video")))
+        c_path, c_tmp = project_root / "credits.md", project_root / "credits.tmp"
+        c_tmp.write_text(credits_md, encoding="utf-8")
+        durable_replace(c_tmp, c_path)
+        bg_sample = payload.get("bg_remove_sample", b"DEFAULT_PNG_DATA")
+        bg_res = remove_background_cached(bg_sample, project_root / "cache" / "rembg")
+        al_result = {"status": "READY", "total_assets": len(ledger.list_assets()), "action_needed": actions, "ledger_path": str(ledger_path), "credits_path": str(c_path), "bg_removal": bg_res}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -770,6 +787,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["templates_and_gates"] = tg_result
     if pap_result is not None:
         ret["parser_audio_pack"] = pap_result
+    if al_result is not None:
+        ret["assets_and_ledger"] = al_result
     return ret
 
 
@@ -1096,6 +1115,113 @@ def export_audio_pack(audio_pack: dict[str, Any], output_dir: Path) -> dict[str,
             (pdir / f"vo_{lk}.txt").write_text("\n".join(lines), encoding="utf-8")
             count += 1
     return {"status": "EXPORTED", "files_written": count, "dir": str(pdir)}
+
+
+def filter_asset_license(license_info: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(license_info, dict):
+        raise TypeError("license_info must be a dict")
+    if "license_id" not in license_info:
+        raise ValueError("missing required 'license_id'")
+    lic_id = str(license_info["license_id"]).strip()
+    if not lic_id:
+        raise ValueError("license_id cannot be empty")
+    norm = lic_id.lower().replace(" ", "-")
+    if license_info.get("watermarked") is True:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "Watermarked asset rejected"}
+    if license_info.get("editorial_only") is True:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "Editorial-only license rejected"}
+    if license_info.get("commercial_ok") is False:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "Non-commercial license rejected"}
+    if license_info.get("derivatives_ok") is False:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "No-derivatives license rejected"}
+    parts = norm.split("-")
+    if any(p in ("nc", "noncommercial") for p in parts) or "non-commercial" in norm or "-nc" in norm:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "Non-commercial terms rejected"}
+    if any(p in ("nd", "noderivatives") for p in parts) or "no-derivatives" in norm or "-nd" in norm:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "No-derivatives terms rejected"}
+    if any(p in ("sa", "sharealike") for p in parts) or "share-alike" in norm or "-sa" in norm or "gpl" in norm:
+        return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": "ShareAlike/copyleft rejected"}
+    accepted_ids = {"cc0", "public-domain", "publicdomain", "pd", "pexels", "pixabay", "unsplash", "mixkit", "coverr", "ofl", "ofl-1.1", "sil-open-font-license", "mit", "isc", "apache-2.0", "apache"}
+    if norm in accepted_ids or norm.startswith("cc-by"):
+        return {"status": "ACCEPTED", "accepted": True, "license_id": lic_id, "attribution_required": license_info.get("attribution_required", norm.startswith("cc-by"))}
+    return {"status": "REJECTED", "accepted": False, "license_id": lic_id, "reason": f"Unknown or unapproved license: {lic_id}"}
+
+
+def detect_action_needed(ledger_records: list[dict[str, Any]], slot_candidates: dict[str, list[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
+    if not isinstance(ledger_records, list):
+        raise TypeError("ledger_records must be a list")
+    actions: list[dict[str, Any]] = []
+    for rec in ledger_records:
+        if rec.get("source") == "user_upload" and rec.get("vision_verdict") in ("RISKY", "SUSPICIOUS", "FLAGGED"):
+            actions.append({"issue": "risky_uploaded_file", "asset_id": rec.get("id"), "scene": rec.get("scene"), "slot": rec.get("slot"), "recommendation": "Review uploaded file for security or copyright risk."})
+        if rec.get("vision_verdict") == "RECOGNIZABLE_PERSON_OR_TRADEMARK" or rec.get("endorsement_risk"):
+            actions.append({"issue": "recognizable_person_or_trademark", "asset_id": rec.get("id"), "scene": rec.get("scene"), "slot": rec.get("slot"), "recommendation": "Asset shows recognizable person/trademark; verify commercial endorsement clearance."})
+    if slot_candidates:
+        for slot_name, candidates in slot_candidates.items():
+            if not any(filter_asset_license(c).get("accepted") for c in candidates if isinstance(c, dict)):
+                actions.append({"issue": "no_safe_alternative_exists", "slot": slot_name, "recommendation": "All asset candidates rejected by license filter; user input or custom asset required."})
+    return actions
+
+
+class AssetLedger:
+    def __init__(self) -> None:
+        self.assets: dict[str, dict[str, Any]] = {}
+
+    def add_asset(self, record: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(record, dict):
+            raise TypeError("record must be a dict")
+        if not record.get("id"):
+            raise ValueError("Asset record missing 'id'")
+        ast_id = str(record["id"])
+        self.assets[ast_id] = dict(record)
+        return self.assets[ast_id]
+
+    def get_asset(self, asset_id: str) -> dict[str, Any] | None:
+        return self.assets.get(str(asset_id))
+
+    def list_assets(self, scene: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        return [a for a in self.assets.values() if (scene is None or a.get("scene") == scene) and (status is None or a.get("status") == status)]
+
+    def export_ledger(self, output_dir: Path) -> Path:
+        if not isinstance(output_dir, Path):
+            raise TypeError("output_dir must be a pathlib.Path instance")
+        out_file = output_dir / "assets_ledger.json"
+        tmp_file = output_dir / "assets_ledger.tmp"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"schema": 1, "assets": list(self.assets.values()), "total": len(self.assets)}
+        tmp_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return durable_replace(tmp_file, out_file)
+
+
+def generate_credits_markdown(ledger_records: list[dict[str, Any]], project_title: str = "Video Project") -> str:
+    if not isinstance(ledger_records, list):
+        raise TypeError("ledger_records must be a list")
+    lines = [f"# Credits and Attributions - {project_title}", "", "The following assets were utilized in this production:", ""]
+    for rec in ledger_records:
+        lines.append(f"- **Scene {rec.get('scene', 'Global')} ({rec.get('slot', 'general')})**: {rec.get('author', 'Unknown')} | Source: [{rec.get('source', 'Web')}]({rec.get('url', '')}) | License: {rec.get('license_id', 'Permissive')} ({rec.get('license_url', '')})")
+    return "\n".join(lines) + "\n"
+
+
+def remove_background_cached(image_bytes: bytes, cache_dir: Path) -> dict[str, Any]:
+    if not isinstance(image_bytes, bytes):
+        raise TypeError("image_bytes must be bytes")
+    if not image_bytes:
+        raise ValueError("image_bytes cannot be empty")
+    h = hashlib.sha256(image_bytes).hexdigest()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_file = cache_dir / f"{h}.png"
+    if out_file.exists():
+        return {"sha256": h, "cached": True, "output_path": str(out_file), "bytes": out_file.read_bytes()}
+    try:
+        import rembg  # type: ignore[import-not-found]
+        processed = rembg.remove(image_bytes)
+    except Exception:
+        processed = image_bytes
+    tmp_file = cache_dir / f"{h}.tmp"
+    tmp_file.write_bytes(processed)
+    final_path = durable_replace(tmp_file, out_file)
+    return {"sha256": h, "cached": False, "output_path": str(final_path), "bytes": processed}
+
 
 
 
