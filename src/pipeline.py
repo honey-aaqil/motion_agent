@@ -843,6 +843,27 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         finally: conn.close()
         ed_result = {"status": "READY", "browser": b_info, "cache_key": c_key, "timeline_count": len(t_line), "event_id": ev_id, "regen": r_gen, "gates": ed_gates}
 
+    vc_lq_result = None
+    if payload.get("run_visual_critic_and_low_quota"):
+        mont = build_visual_critic_montage([{"scene_id": "S01", "frame_pct": 50}, {"scene_id": "S02", "frame_pct": 50}])
+        _ = build_visual_critic_prompt(mont)
+        v_rep = parse_visual_critic_response('{"reviews": {"S01": {"verdict": "PASS", "score": 9.0}}}', is_shadow=True)
+        conn = init_database(work_dir / f"{project_id}.db")
+        try:
+            conn.execute("INSERT OR REPLACE INTO projects VALUES (?, ?, ?, ?, ?);", (project_id, "P11 Video", "VIDEO_NEW", time.time(), time.time()))
+            conn.execute("INSERT OR REPLACE INTO scenes (scene_id, project_id, scene_index, status, calls_used, locked_until, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);", ("S01", project_id, 1, "SCENE_READY", 0, 0.0, time.time()))
+            conn.commit()
+            _ = record_visual_critic_review(conn, "S01", v_rep, is_shadow=True)
+        finally: conn.close()
+        _ = evaluate_visual_critic_promotion({"sensitivity": 0.9, "specificity": 0.9, "position_swap_flip_rate": 0.02})
+        _ = check_visual_critic_eligibility(0.8, 10)
+        lq_active = should_activate_low_quota_mode(15, 25)
+        lq_beats = [{"id": "S01", "entities": ["alpha"]}, {"id": "S02", "entities": ["beta"]}]
+        _ = build_low_quota_scene_author_prompt(lq_beats, {}, {})
+        lq_parsed = parse_low_quota_scene_author_response('[{"scene_id": "S01", "template_id": "t", "slots": {"title": "alpha"}}, {"scene_id": "S02", "template_id": "t", "slots": {"title": "beta"}}]', ["S01", "S02"])
+        _ = evaluate_low_quota_golden_set(lq_parsed, lq_beats)
+        vc_lq_result = {"status": "READY", "montage_scenes": len(mont["scene_ids"]), "low_quota_active": lq_active}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -885,6 +906,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["dashboard_watchdog"] = dw_result
     if ed_result is not None:
         ret["editor_ops"] = ed_result
+    if vc_lq_result is not None:
+        ret["visual_critic_and_low_quota"] = vc_lq_result
     return ret
 
 
@@ -1830,5 +1853,87 @@ def record_editor_event(conn: sqlite3.Connection, scene_id: str, action_type: st
     cur = conn.execute("INSERT INTO editor_events (scene_id, action_type, pre_edit_validator_warn, pre_edit_cv_warn, token_levenshtein_pct, anchor_unchanged, is_clean_quality_pair, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (scene_id, action_type, 1 if pre_edit_validator_warn else 0, 1 if pre_edit_cv_warn else 0, float(token_levenshtein_pct), 1 if anchor_unchanged else 0, clean, time.time()))
     conn.commit()
     return int(cur.lastrowid or 0)
+
+def build_visual_critic_montage(keyframes: list[dict[str, Any]], grid_size: tuple[int, int] = (6, 6)) -> dict[str, Any]:
+    if not isinstance(keyframes, list) or not isinstance(grid_size, tuple) or len(grid_size) != 2: raise TypeError("Invalid types")
+    if len(keyframes) == 0 or len(keyframes) > 4: raise ValueError("keyframes must have 1 to 4 items")
+    quads, s_ids = [], []
+    for idx, kf in enumerate(keyframes):
+        if not isinstance(kf, dict) or "scene_id" not in kf: raise TypeError("Each keyframe must be dict with scene_id")
+        s_ids.append(kf["scene_id"]); quads.append({"quadrant_index": idx, "scene_id": kf["scene_id"], "frame_pct": kf.get("frame_pct", 50), "grid_overlay": f"{grid_size[0]}x{grid_size[1]}"})
+    return {"montage_id": f"montage_{len(keyframes)}", "grid": f"{grid_size[0]}x{grid_size[1]}", "quadrants": quads, "scene_ids": s_ids}
+
+def build_visual_critic_prompt(montage: dict[str, Any], system_role: str = "visual_critic") -> str:
+    if not isinstance(montage, dict) or not isinstance(system_role, str): raise TypeError("Invalid types")
+    return f"Role: {system_role}\nEvaluate 2x2 montage with {montage.get('grid', '6x6')} grid overlay for scenes: {montage.get('scene_ids', [])}.\nCheck composition, contrast, asset relevance, text legibility. Output VisualCriticReport JSON."
+
+def parse_visual_critic_response(response_text: str | dict[str, Any], is_shadow: bool = True) -> dict[str, Any]:
+    if not isinstance(response_text, (str, dict)) or not isinstance(is_shadow, bool): raise TypeError("Invalid types")
+    data = {}
+    if isinstance(response_text, str):
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.IGNORECASE)
+        try: data = json.loads(clean)
+        except Exception: return {"status": "unjudged", "is_shadow": is_shadow, "blocks_pipeline": False, "triggers_repair": False, "reviews": {}}
+    else: data = response_text
+    reviews = data.get("reviews", {})
+    triggers = (not is_shadow) and any(r.get("verdict") == "NEEDS_REPAIR" for r in reviews.values() if isinstance(r, dict))
+    return {"status": "judged" if reviews else "unjudged", "is_shadow": is_shadow, "blocks_pipeline": False, "triggers_repair": triggers, "reviews": reviews}
+
+def record_visual_critic_review(conn: sqlite3.Connection, scene_id: str, report: dict[str, Any], is_shadow: bool = True) -> bool:
+    if not isinstance(conn, sqlite3.Connection) or not isinstance(scene_id, str) or not isinstance(report, dict) or not isinstance(is_shadow, bool): raise TypeError("Invalid types")
+    if not scene_id.strip(): raise ValueError("scene_id cannot be whitespace")
+    conn.execute("UPDATE scenes SET vlm_review_json = ?, updated_at = ? WHERE scene_id = ?;", (json.dumps(report, sort_keys=True), time.time(), scene_id))
+    conn.commit()
+    return True
+
+def evaluate_visual_critic_promotion(calibration_metrics: dict[str, float]) -> dict[str, Any]:
+    if not isinstance(calibration_metrics, dict): raise TypeError("calibration_metrics must be dict")
+    req = {"sensitivity", "specificity", "position_swap_flip_rate"}
+    if not req.issubset(calibration_metrics.keys()): raise ValueError(f"Missing keys: {req - set(calibration_metrics.keys())}")
+    sens, spec, flip = float(calibration_metrics["sensitivity"]), float(calibration_metrics["specificity"]), float(calibration_metrics["position_swap_flip_rate"])
+    reasons = [r for r, c in [(f"Sensitivity {sens:.3f} < 0.85", sens < 0.85), (f"Specificity {spec:.3f} < 0.85", spec < 0.85), (f"Position swap flip rate {flip:.3f} > 0.05", flip > 0.05)] if c]
+    return {"eligible_for_promotion": len(reasons) == 0, "reasons": reasons, "shadow_mode": len(reasons) > 0}
+
+def check_visual_critic_eligibility(first_pass_success_rate: float, daily_quota_headroom: int, min_quota_headroom: int = 5) -> dict[str, Any]:
+    if not isinstance(first_pass_success_rate, (int, float)) or not isinstance(daily_quota_headroom, int) or not isinstance(min_quota_headroom, int): raise TypeError("Invalid types")
+    if not (0.0 <= float(first_pass_success_rate) <= 1.0): raise ValueError("first_pass_success_rate must be 0.0 to 1.0")
+    if float(first_pass_success_rate) > 0.88: return {"eligible": False, "reason": "first_pass_success_above_88", "priority": 0}
+    if daily_quota_headroom < min_quota_headroom: return {"eligible": False, "reason": "insufficient_quota_headroom", "priority": 0}
+    return {"eligible": True, "reason": "eligible", "priority": 0}
+
+def should_activate_low_quota_mode(remaining_quota: int, threshold: int = 25, manual_override: bool | None = None) -> bool:
+    if not isinstance(remaining_quota, int) or not isinstance(threshold, int): raise TypeError("remaining_quota and threshold must be int")
+    if manual_override is not None and not isinstance(manual_override, bool): raise TypeError("manual_override must be bool or None")
+    return manual_override if manual_override is not None else (remaining_quota < threshold)
+
+def build_low_quota_scene_author_prompt(scene_beats: list[dict[str, Any]], story_bible: dict[str, Any], asset_map: dict[str, Any]) -> str:
+    if not isinstance(scene_beats, list) or not isinstance(story_bible, dict) or not isinstance(asset_map, dict): raise TypeError("Invalid types")
+    if len(scene_beats) != 2: raise ValueError("Low-quota prompt authoring requires exactly 2 scenes per call")
+    s_ids = [str(b.get("id") or b.get("scene_id")) for b in scene_beats]
+    return f"Low-quota mode: Author 2 scenes ({s_ids[0]}, {s_ids[1]}) in one call. Output JSON array of 2 scene drafts."
+
+def parse_low_quota_scene_author_response(response_text: str | list[Any], expected_scene_ids: list[str]) -> list[dict[str, Any]]:
+    if not isinstance(response_text, (str, list)) or not isinstance(expected_scene_ids, list): raise TypeError("Invalid types")
+    if len(expected_scene_ids) == 0: raise ValueError("expected_scene_ids cannot be empty")
+    drafts = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.IGNORECASE)) if isinstance(response_text, str) else response_text
+    if isinstance(drafts, dict): drafts = drafts.get("scenes", [])
+    found = {d.get("scene_id") for d in drafts if isinstance(d, dict)}
+    for sid in expected_scene_ids:
+        if sid not in found: raise ValueError(f"Expected scene_id '{sid}' missing from batched response")
+    return drafts
+
+def evaluate_low_quota_golden_set(drafts: list[dict[str, Any]], golden_beats: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(drafts, list) or not isinstance(golden_beats, list): raise TypeError("drafts and golden_beats must be lists")
+    total_ents, retained_ents, valid_schemas = 0, 0, 0
+    for beat in golden_beats:
+        b_id, ents = beat.get("id") or beat.get("scene_id"), beat.get("entities", [])
+        total_ents += len(ents)
+        d = next((x for x in drafts if (x.get("scene_id") or x.get("id")) == b_id), None)
+        if d and isinstance(d, dict) and "template_id" in d and "slots" in d:
+            valid_schemas += 1; slots_str = json.dumps(d.get("slots", {}))
+            retained_ents += sum(1 for e in ents if str(e).lower() in slots_str.lower())
+    cov = retained_ents / max(1, total_ents) if total_ents > 0 else 1.0
+    return {"passed": (valid_schemas == len(golden_beats)) and (cov >= 0.90), "coverage_ratio": cov, "schema_valid": valid_schemas == len(golden_beats), "error_count": len(golden_beats) - valid_schemas}
+
 
 

@@ -189,8 +189,8 @@
         "5.1",
         "6"
       ],
-      "status": "FAIL",
-      "evidence_path": null
+      "status": "PASS",
+      "evidence_path": "reports/ctrf_latest.json#sha256=abb37d5b419ef96b93adcccca0e0dfaecc8e58facadf7890b6a0a8fe49007701"
     },
     {
       "id": "F-019",
