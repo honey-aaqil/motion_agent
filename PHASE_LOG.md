@@ -200,6 +200,19 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-017
 [PASS Feature F-017] Feature F-017 set to PASS (sha256=e6e3cfcdf1791e5b19a44a6cfed6b7a3a94acc581ac57af918b2bd81724e6515).
 ```
 
+## Phase P11: Visual critic (shadow) and low-quota mode (F-018)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-018
+........................................................................ [ 76%]
+......................                                                   [100%]
+94 passed in 23.14s
+........................................................................ [ 76%]
+......................                                                   [100%]
+94 passed in 21.71s
+[PASS Feature F-018] Feature F-018 set to PASS (sha256=abb37d5b419ef96b93adcccca0e0dfaecc8e58facadf7890b6a0a8fe49007701).
+```
+
+
 
 
 
