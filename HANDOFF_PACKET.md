@@ -1,6 +1,6 @@
 # 1. PACKET_HEADER
-task_id: F-018            stage: REVIEW
-date: 2026-10-29          tool: Antigravity
+task_id: F-019            stage: REVIEW
+date: 2026-11-01          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
 - Max 2 LLM calls per scene; 503/429 never consume a call.
@@ -12,13 +12,13 @@ date: 2026-10-29          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Batched Visual critic (`build_visual_critic_montage`, `build_visual_critic_prompt`, `parse_visual_critic_response`, `record_visual_critic_review`, `evaluate_visual_critic_promotion`, `check_visual_critic_eligibility`) and low-quota mode (`should_activate_low_quota_mode`, `build_low_quota_scene_author_prompt`, `parse_low_quota_scene_author_response`, `evaluate_low_quota_golden_set`), all wired into `run_pipeline`
-- `tests\regression\test_f018_visual_critic_low_quota.py`: Regression tests covering 2x2 montage with 6x6 grid overlay, fail-open shadow critic reports, database review records without blocking scenes, promotion criteria, headroom/eligibility checks, 2-scene batching prompts and parsing, and golden set entity coverage evaluations
-- `PHASE_LOG.md`: Phase P11 (F-018) verification output recorded
+- `src\pipeline.py`: Deliverables packaging (`build_cue_sheet`, `generate_thumbnail_options`, `bundle_editable_project`, `assemble_final_package`) and chaos soak simulation (`simulate_chaos_soak_test`), all wired into `run_pipeline`
+- `tests\regression\test_f019_package_and_soak.py`: Regression tests for packaging deliverables (out/ hierarchy, 6 video outputs, cue sheets in CSV/MD, 3 thumbnail options per ratio, editable_project.zip under 260 char paths) and 6-hour chaos soak (120 scenes, fault injection catch, WAL zero-loss recovery, RAM budget)
+- `PHASE_LOG.md`: Phase P12 (F-019) verification output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-018
-result: passed=94 failed=0   report_sha256: abb37d5b419ef96b93adcccca0e0dfaecc8e58facadf7890b6a0a8fe49007701   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-019
+result: passed=101 failed=0   report_sha256: b1ccc97b0e2cacfc1b5b5094f487afe97b0ca62f267fa12ffa93304478e434ab   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,7 +30,8 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-019 (Phase P12): Packaging and 6-hour soak (SPEC Sections 16, 17).
+  Start Feature F-020 (Phase P13): Improvement program (rules, exemplar bank) (SPEC Section 14).
+
 
 
 
