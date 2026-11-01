@@ -224,6 +224,19 @@ PS C:\motion-agent> python scripts\verify_done.py --feature F-019
 [PASS Feature F-019] Feature F-019 set to PASS (sha256=b1ccc97b0e2cacfc1b5b5094f487afe97b0ca62f267fa12ffa93304478e434ab).
 ```
 
+## Phase P13: Improvement program (rules, exemplar bank) (F-020)
+```
+PS C:\motion-agent> python scripts\verify_done.py --feature F-020
+........................................................................ [ 66%]
+....................................                                     [100%]
+108 passed in 19.52s
+........................................................................ [ 66%]
+....................................                                     [100%]
+108 passed in 19.08s
+[PASS Feature F-020] Feature F-020 set to PASS (sha256=628bc39bc77057f0901009823e4495561c7d77da16ed833849cb90224530ade2).
+```
+
+
 
 
 
