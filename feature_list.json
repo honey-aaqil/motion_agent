@@ -210,8 +210,8 @@
       "spec": [
         "14"
       ],
-      "status": "FAIL",
-      "evidence_path": null
+      "status": "PASS",
+      "evidence_path": "reports/ctrf_latest.json#sha256=628bc39bc77057f0901009823e4495561c7d77da16ed833849cb90224530ade2"
     }
   ]
 }

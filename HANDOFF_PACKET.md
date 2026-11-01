@@ -1,5 +1,5 @@
 # 1. PACKET_HEADER
-task_id: F-019            stage: REVIEW
+task_id: F-020            stage: REVIEW
 date: 2026-11-01          tool: Antigravity
 
 # 2. INVARIANTS_CONTRACT
@@ -12,13 +12,13 @@ date: 2026-11-01          tool: Antigravity
 - Diff budget is at most 5 files and 250 net lines per task; every public symbol in src\ must be wired to src\pipeline.py and fail a test when mutated to return None.
 
 # 3. ARTIFACT_PAYLOAD
-- `src\pipeline.py`: Deliverables packaging (`build_cue_sheet`, `generate_thumbnail_options`, `bundle_editable_project`, `assemble_final_package`) and chaos soak simulation (`simulate_chaos_soak_test`), all wired into `run_pipeline`
-- `tests\regression\test_f019_package_and_soak.py`: Regression tests for packaging deliverables (out/ hierarchy, 6 video outputs, cue sheets in CSV/MD, 3 thumbnail options per ratio, editable_project.zip under 260 char paths) and 6-hour chaos soak (120 scenes, fault injection catch, WAL zero-loss recovery, RAM budget)
-- `PHASE_LOG.md`: Phase P12 (F-019) verification output recorded
+- `src\pipeline.py`: Improvement program implementation (`audit_failure_pool`, `manage_improvement_rule`, `replay_rule_history`, `manage_exemplar_bank`, `retrieve_exemplars`, `run_model_migration_checklist`), wired into `run_pipeline`
+- `tests\regression\test_f020_improvement_program.py`: Regression tests for failure pool categorization & recommendation, rule mining & 1-step rollback, offline history replay (0 regressions), exemplar bank lifecycle & compatibility retirement, exemplar retrieval ranking, and model migration checklist.
+- `PHASE_LOG.md`: Phase P13 (F-020) verification output recorded
 
 # 4. DETERMINISTIC_TEST_LOG
-command: python scripts\verify_done.py --feature F-019
-result: passed=101 failed=0   report_sha256: b1ccc97b0e2cacfc1b5b5094f487afe97b0ca62f267fa12ffa93304478e434ab   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
+command: python scripts\verify_done.py --feature F-020
+result: passed=108 failed=0   report_sha256: 628bc39bc77057f0901009823e4495561c7d77da16ed833849cb90224530ade2   sabotage_checks: failing_test,protected_file,diff_budget,dead_code,readonly_lock: PASS
 
 # 5. REVIEWER_INSTRUCTIONS
 Inspect ARTIFACT_PAYLOAD against INVARIANTS_CONTRACT. List only concrete
@@ -30,10 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Start Feature F-020 (Phase P13): Improvement program (rules, exemplar bank) (SPEC Section 14).
-
-
-
-
-
-
+  All core roadmap features (F-001 through F-020, Phases P-1 through P13) are complete and PASS. Conduct final full-suite verification and milestone review.

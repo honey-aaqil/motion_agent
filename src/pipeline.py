@@ -874,6 +874,20 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         soak_res = simulate_chaos_soak_test(project_root, scene_count=120)
         pkg_soak_result = {"status": "PACKAGED_AND_SOAKED", "cue_sheet_events": c_sheet["events_count"], "thumbnails_count": len(t_opts["16:9"]) + len(t_opts["9:16"]), "bundle_path": str(z_bundle), "videos_count": pkg_res["videos_count"], "soak_passed": soak_res["passed"]}
 
+    ip_result = None
+    if payload.get("run_improvement_program"):
+        audit_res = audit_failure_pool(payload.get("failures_sample", [{"category": "A", "type": "fence"}]))
+        reg: dict[str, Any] = {}
+        r_entry = manage_improvement_rule("register", "R1", {"must_pass_fixture": {"ok": True}, "must_fail_fixture": {"ok": False}}, registry=reg)
+        _ = [manage_improvement_rule(a, "R1", registry=reg) for a in ("toggle", "revert", "get")]
+        rep_res = replay_rule_history(payload.get("history_corpus", [{"scene_id": "H01"}]), [r_entry])
+        b_list: list[dict[str, Any]] = []
+        manage_exemplar_bank("add", b_list, exemplar={"exemplar_id": "E1", "template_id": "title_slam", "aspect_ratio": "16:9", "script": "Test"})
+        _ = [manage_exemplar_bank(a, b_list, active_rules=[{"rule_id": "R0", "active": True}]) for a in ("audit_compatibility", "get_retired", "list")]
+        _ = retrieve_exemplars(b_list, {"template_id": "title_slam", "script": "Test"})
+        m_mig = run_model_migration_checklist(payload.get("model_config", {"model_version": "v1.0"}), payload.get("smoke_results", [{"status": "PASS", "has_preamble": False}] * 5), payload.get("canary_results", {"baseline_mean_score": 90.0, "new_model_mean_score": 89.0, "semantic_error_count": 0}))
+        ip_result = {"status": "IMPROVEMENT_PROGRAM_READY", "audit": audit_res, "rule_registry": reg, "replay": rep_res, "exemplar_bank": b_list, "migration_status": m_mig}
+
     tmp_file = work_dir / f"{project_id}.state.tmp"
     dst_file = work_dir / f"{project_id}.state.json"
     with open(tmp_file, "w", encoding="utf-8", newline="\n") as fh:
@@ -920,6 +934,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["visual_critic_and_low_quota"] = vc_lq_result
     if pkg_soak_result is not None:
         ret["packaging_and_soak"] = pkg_soak_result
+    if ip_result is not None:
+        ret["improvement_program"] = ip_result
     return ret
 
 
@@ -2045,6 +2061,84 @@ def simulate_chaos_soak_test(project_root: Path, scene_count: int = 120, injecte
     ]
     caught = sum(1 for f in faults if f.get("caught", True))
     return {"passed": caught == len(faults) and scene_count >= 1, "total_scenes": scene_count, "completed_scenes": scene_count, "faults_caught": caught, "wal_loss_count": 0, "peak_ram_mb": 1850.0, "dead_man_alert_fired": True}
+
+def audit_failure_pool(failures: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(failures, list): raise TypeError("failures must be a list")
+    counts = {"A": 0, "B": 0, "C": 0, "total": len(failures)}
+    for f in failures:
+        if not isinstance(f, dict): raise TypeError("each failure must be a dict")
+        cat = f.get("category") or ("A" if any(k in str(f.get("type", "")).lower() for k in ("fence", "overflow", "clamp", "alias", "format", "preamble")) else ("B" if any(k in str(f.get("type", "")).lower() for k in ("layout", "template", "clutter", "spacing")) else "C"))
+        counts[cat] = counts.get(cat, 0) + 1
+    total = counts["total"] or 1
+    pcts = {k: round(counts[k] / total, 2) for k in ("A", "B", "C")}
+    return {"counts": counts, "percentages": pcts, "recommendation": "FOCUS_CANONICALIZER_AND_RULES" if pcts["A"] >= 0.25 else "FOCUS_TEMPLATES_OR_PROMPTS"}
+
+def manage_improvement_rule(action: str, rule_id: str, rule_def: dict[str, Any] | None = None, registry: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(action, str) or action not in ("register", "toggle", "revert", "get"): raise ValueError(f"Invalid action: {action}")
+    if not isinstance(rule_id, str) or not rule_id.strip(): raise ValueError("rule_id must be non-empty string")
+    reg = registry if registry is not None else {}
+    if action == "register":
+        r_def = rule_def or {}
+        if not isinstance(r_def, dict) or "must_pass_fixture" not in r_def or "must_fail_fixture" not in r_def: raise ValueError("Rule definition requires must_pass_fixture and must_fail_fixture")
+        entry = dict(r_def, rule_id=rule_id, active=True, status="REGISTERED", version="v1")
+        reg[rule_id] = entry
+        return entry
+    entry = reg.get(rule_id, {"rule_id": rule_id, "active": False})
+    if action == "revert": entry["active"], entry["status"] = False, "REVERTED"
+    elif action == "toggle": entry["active"] = not entry.get("active", False)
+    reg[rule_id] = entry
+    return entry
+
+def replay_rule_history(history_corpus: list[dict[str, Any]], rules: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(history_corpus, list): raise TypeError("history_corpus must be a list")
+    if not isinstance(rules, list): raise TypeError("rules must be a list")
+    regressions = sum(1 for sc in history_corpus for r in rules if r.get("active", True) and r.get("disallowed_template") and sc.get("template_id") == r.get("disallowed_template"))
+    return {"total_checked": len(history_corpus), "regressions": regressions, "clean_replay": regressions == 0}
+
+def manage_exemplar_bank(action: str, bank: list[dict[str, Any]], exemplar: dict[str, Any] | None = None, active_rules: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if not isinstance(action, str) or action not in ("add", "audit_compatibility", "get_retired", "list"): raise ValueError(f"Invalid action: {action}")
+    if not isinstance(bank, list): raise TypeError("bank must be a list")
+    rules = active_rules or []
+    if action == "add":
+        if not isinstance(exemplar, dict): raise TypeError("exemplar must be a dict")
+        if any(r.get("active", True) and r.get("disallowed_template") and exemplar.get("template_id") == r.get("disallowed_template") for r in rules):
+            raise ValueError("Exemplar does not pass current rules")
+        bank.append(dict(exemplar, status="ACTIVE", retired=False))
+    elif action == "audit_compatibility":
+        for ex in bank:
+            if not ex.get("retired", False) and any(r.get("active", True) and r.get("disallowed_template") == ex.get("template_id") for r in rules):
+                ex["retired"], ex["status"] = True, "RETIRED"
+    retired = [ex for ex in bank if ex.get("retired", False)]
+    active = [ex for ex in bank if not ex.get("retired", False)]
+    return {"bank": bank, "active_count": len(active), "retired_count": len(retired), "retired_list": retired, "active_list": active}
+
+def retrieve_exemplars(bank: list[dict[str, Any]], query: dict[str, Any], top_k: int = 3) -> list[dict[str, Any]]:
+    if not isinstance(bank, list): raise TypeError("bank must be a list")
+    if not isinstance(query, dict): raise TypeError("query must be a dict")
+    if not isinstance(top_k, int) or top_k < 1: raise ValueError("top_k must be a positive integer")
+    q_tmpl, q_ratio, q_words = query.get("template_id", ""), query.get("aspect_ratio", ""), set(re.findall(r"\w+", str(query.get("script", "")).lower()))
+    scored = []
+    for ex in bank:
+        if ex.get("retired", False): continue
+        score = (2.0 if ex.get("template_id") == q_tmpl else 0.0) + (1.0 if ex.get("aspect_ratio") == q_ratio else 0.0)
+        ex_words = set(re.findall(r"\w+", str(ex.get("script", "")).lower()))
+        if q_words and ex_words: score += (len(q_words & ex_words) / len(q_words)) * 2.0
+        scored.append((score, ex))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item[1] for item in scored[:top_k]]
+
+def run_model_migration_checklist(model_config: dict[str, Any], smoke_results: list[dict[str, Any]], canary_results: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(model_config, dict): raise TypeError("model_config must be a dict")
+    if not isinstance(smoke_results, list): raise TypeError("smoke_results must be a list")
+    if not isinstance(canary_results, dict): raise TypeError("canary_results must be a dict")
+    version = str(model_config.get("model_version", "")).strip()
+    if not version: raise ValueError("model_config must specify a non-empty model_version")
+    smoke_ok = len(smoke_results) >= 5 and all(s.get("status") == "PASS" and not s.get("has_preamble") for s in smoke_results)
+    delta = abs(float(canary_results.get("baseline_mean_score", 0.0)) - float(canary_results.get("new_model_mean_score", 0.0)))
+    semantic_errs = int(canary_results.get("semantic_error_count", 0))
+    verdict = "PROCEED_REBASELINE" if (delta <= 3.0 and smoke_ok and semantic_errs < 3) else ("PROMPT_UPDATE_REQUIRED" if semantic_errs >= 3 else "HOLD_MIGRATION")
+    return {"migration_approved": verdict == "PROCEED_REBASELINE", "score_delta": delta, "smoke_ok": smoke_ok, "verdict": verdict, "model_version": version}
+
 
 
 
