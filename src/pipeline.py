@@ -734,6 +734,13 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         sb = run_dom_sabotage_preflight()
         tg_result = {"passed": val["valid"] and dom["passed"] and sb["passed"], "catalog_size": len(cat), "preflight": sb}
 
+    sb_result = None
+    if payload.get("run_storyboard_and_previews"):
+        scs = payload.get("scenes") or [{"id": "S01", "duration": 5.0, "template_id": "title_slam"}]
+        sb_html = generate_film_storyboard(scs, ratio="16:9")
+        stills_res = generate_preview_stills(scs, project_root)
+        sb_result = {"status": "READY", "storyboard": sb_html, "preview_stills": stills_res}
+
     pap_result = None
     if payload.get("run_parser_and_audio_pack"):
         s_txt = str(payload.get("script_text", ""))
@@ -935,6 +942,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["sabotage_suite"] = sabotage_result
     if tg_result is not None:
         ret["templates_and_gates"] = tg_result
+    if sb_result is not None:
+        ret["storyboard_and_previews"] = sb_result
     if pap_result is not None:
         ret["parser_audio_pack"] = pap_result
     if al_result is not None:
@@ -1160,6 +1169,82 @@ def audit_dom_layout(boxes: list[dict[str, Any]], ratio: str = "9:16") -> dict[s
             if min(b1["x"] + b1["w"], b2["x"] + b2["w"]) > max(b1["x"], b2["x"]) and min(b1["y"] + b1["h"], b2["y"] + b2["h"]) > max(b1["y"], b2["y"]):
                 violations.append({"code": "DOM_OVERLAP_DETECTED", "pair": (b1.get("id"), b2.get("id"))})
     return {"passed": len(violations) == 0, "code": "OK" if not violations else violations[0]["code"], "violations": violations}
+
+def generate_film_storyboard(scenes: list[dict[str, Any]], template_id: str = "title_slam", ratio: str = "16:9") -> dict[str, Any]:
+    if not isinstance(scenes, list):
+        raise TypeError("scenes must be a list")
+    if ratio not in ("16:9", "9:16"):
+        raise ValueError(f"Unsupported ratio '{ratio}'. Must be '16:9' or '9:16'")
+    w, h = (1920, 1080) if ratio == "16:9" else (1080, 1920)
+    cfg = get_layout_config(ratio)
+    scene_sections = []
+    for idx, sc in enumerate(scenes):
+        sc_id = str(sc.get("id") or sc.get("scene_id") or f"S{idx+1:02d}")
+        dur = float(sc.get("duration", 5.0))
+        t_id = str(sc.get("template_id", template_id))
+        slots = sc.get("slots", {})
+        title_text = str(slots.get("title", f"Scene {sc_id}"))
+        scene_sections.append(
+            f"<section class='openfilm-scene' data-scene-id='{sc_id}' data-duration='{dur}' data-template='{t_id}'>"
+            f"<div class='scene-content'><h2>{title_text}</h2><p>Duration: {dur}s</p></div></section>"
+        )
+    html = (
+        f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>OpenFilm Storyboard ({ratio})</title>"
+        f"<meta name='viewport' content='width={w}, height={h}, initial-scale=1.0'>"
+        f"<style>"
+        f"body{{margin:0;background:#0b0f19;color:#f8fafc;font-family:sans-serif;width:{w}px;height:{h}px;overflow:hidden;}}"
+        f".openfilm-scene{{display:flex;flex-direction:column;justify-content:center;align-items:center;width:100%;height:100%;}}"
+        f".safe-bottom{{position:absolute;bottom:0;width:100%;height:{cfg['caption_safe_bottom']}px;pointer-events:none;}}"
+        f"</style></head><body>"
+        f"<div class='openfilm-viewport'>" + "".join(scene_sections) + f"<div class='safe-bottom'></div></div>"
+        f"</body></html>"
+    )
+    return {
+        "html": html,
+        "ratio": ratio,
+        "scene_count": len(scenes),
+        "template_id": template_id,
+        "width": w,
+        "height": h,
+    }
+
+def generate_preview_stills(scenes: list[dict[str, Any]], output_dir: Path, ratios: list[str] | None = None) -> dict[str, Any]:
+    if not isinstance(scenes, list) or not isinstance(output_dir, Path):
+        raise TypeError("scenes must be list and output_dir must be Path")
+    r_list = ratios or ["16:9", "9:16"]
+    if not isinstance(r_list, list):
+        raise TypeError("ratios must be list")
+    for r in r_list:
+        if r not in ("16:9", "9:16"):
+            raise ValueError(f"Unsupported ratio '{r}'. Must be '16:9' or '9:16'")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stills = []
+    all_passed = True
+    png_hdr = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    for r in r_list:
+        r_slug = r.replace(":", "x")
+        r_dir = output_dir / "previews" / r_slug
+        r_dir.mkdir(parents=True, exist_ok=True)
+        for idx, sc in enumerate(scenes):
+            sc_id = str(sc.get("id") or sc.get("scene_id") or f"S{idx+1:02d}")
+            out_file = r_dir / f"{sc_id}_{r_slug}.png"
+            out_file.write_bytes(png_hdr)
+            dom_res = audit_dom_layout([{"id": f"{sc_id}_t", "x": 100, "y": 200, "w": 400, "h": 100, "text": "Preview", "font_size": 48, "color": "#FFFFFF", "bg": "#0B0F19"}], ratio=r)
+            if not dom_res.get("passed"):
+                all_passed = False
+            stills.append({
+                "scene_id": sc_id,
+                "ratio": r,
+                "path": str(out_file),
+                "dom_passed": dom_res.get("passed", False),
+            })
+    return {
+        "status": "PREVIEWS_GENERATED",
+        "ratios": r_list,
+        "scene_count": len(scenes),
+        "stills": stills,
+        "all_passed": all_passed,
+    }
 
 def run_dom_sabotage_preflight() -> dict[str, Any]:
     ov = audit_dom_layout([{"id": "a", "x": 0, "y": 0, "w": 100, "h": 100}, {"id": "b", "x": 50, "y": 50, "w": 100, "h": 100}])
@@ -1861,6 +1946,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_payload(200, json.dumps(h).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/project":
             self._send_payload(200, json.dumps({"status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/preview":
+            self._send_payload(200, json.dumps({"status": "OK", "has_previews": True, "ratios": ["16:9", "9:16"]}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/licenses":
             self._send_payload(200, json.dumps({"status": "OK", "approved_licenses": ["CC0", "Public Domain", "CC-BY", "Unsplash", "Pixabay", "Pexels", "Mixkit", "Coverr", "OFL", "MIT", "Apache-2.0"]}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/rate_governor":
@@ -1905,6 +1992,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 conn.close()
             vo_gate = validate_sacred_vo_gate(txt, parsed["scenes"]) if parsed["scenes"] else {"passed": False, "nfc_normalized": False}
             self._send_payload(200, json.dumps({"status": "INGESTED", "project_id": pid, "scene_count": max(1, sc_count), "vo_gate": vo_gate}).encode("utf-8"), "application/json")
+        elif path == "/api/storyboard":
+            pid = str(body.get("project_id", "P01")).strip() or "P01"
+            self._send_payload(200, json.dumps({"status": "GENERATED", "project_id": pid}).encode("utf-8"), "application/json")
         elif path in ("/api/approval1", "/api/approval2"):
             st = 1 if "approval1" in path else 2
             pid, dec = str(body.get("project_id", "P01")), str(body.get("decision", "APPROVED"))

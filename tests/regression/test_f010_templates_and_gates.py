@@ -5,6 +5,7 @@ import pytest
 from src.pipeline import (
     get_layout_config, get_template_catalog, canonicalize_scene_spec,
     validate_scene_spec, audit_dom_layout, run_dom_sabotage_preflight, run_pipeline,
+    generate_film_storyboard, generate_preview_stills
 )
 
 TEMPLATES = {"title_slam", "big_statement", "concept_diagram", "comparison_split", "process_flow", "timeline", "stat_counter", "icon_grid", "chart", "image_focus", "two_image_contrast", "quote", "list_reveal", "outro"}
@@ -53,3 +54,34 @@ def test_f010_dom_gate_and_pipeline(tmp_path: Path) -> None:
     # Pipeline wiring
     pipe = run_pipeline(tmp_path, {"project_id": "P_F010_PIPE", "run_templates_and_gates": True})
     assert pipe.get("templates_and_gates", {}).get("passed") is True
+
+def test_f010_film_storyboard_and_preview_stills(tmp_path: Path) -> None:
+    with pytest.raises(TypeError):
+        generate_film_storyboard("bad")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Unsupported ratio"):
+        generate_film_storyboard([], ratio="4:3")
+    with pytest.raises(TypeError):
+        generate_preview_stills("bad", tmp_path)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        generate_preview_stills([], "not_a_path")  # type: ignore[arg-type]
+
+    scenes = [
+        {"id": "S01", "template_id": "title_slam", "slots": {"title": "Quantum Reality"}, "duration": 4.0},
+        {"id": "S02", "template_id": "concept_diagram", "slots": {"title": "Wave Particle"}, "duration": 6.0},
+    ]
+    sb16 = generate_film_storyboard(scenes, ratio="16:9")
+    assert isinstance(sb16, dict) and "<!DOCTYPE html>" in sb16["html"]
+    assert "openfilm" in sb16["html"].lower() and sb16["scene_count"] == 2 and sb16["ratio"] == "16:9"
+
+    stills = generate_preview_stills(scenes, tmp_path, ratios=["16:9", "9:16"])
+    assert stills["status"] == "PREVIEWS_GENERATED"
+    assert stills["scene_count"] == 2 and stills["all_passed"] is True
+    assert len(stills["stills"]) == 4  # 2 scenes * 2 ratios
+    for s_info in stills["stills"]:
+        p = Path(s_info["path"])
+        assert p.is_file() and p.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+    pipe = run_pipeline(tmp_path, {"project_id": "P_SB_TEST", "run_storyboard_and_previews": True, "scenes": scenes})
+    assert "storyboard_and_previews" in pipe
+    assert pipe["storyboard_and_previews"]["status"] == "READY"
+    assert pipe["storyboard_and_previews"]["preview_stills"]["all_passed"] is True

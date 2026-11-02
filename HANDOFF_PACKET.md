@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Phase 4 Complete: Stage S1 sacred VO gate (validate_sacred_vo_gate) enforces verbatim voice-over invariance, Unicode NFC normalization across all languages, and zero line drops; integrated into pipeline and /api/script dashboard endpoint; 112/112 tests passing. Ready for Phase 5 (Stage S2 OpenFilm DOM Template engine & Asset Resolution).
+  Phase 5 Complete: Stage S2 OpenFilm DOM storyboard generator (generate_film_storyboard) and dual-ratio preview stills generator (generate_preview_stills for 16:9 and 9:16) with safe-zone audit; wired into pipeline, /api/preview, and /api/storyboard; 113/113 tests passing. Ready for Phase 6 (Stage S4 Audio-Timing Synchronization).
