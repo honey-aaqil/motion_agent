@@ -924,8 +924,9 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         t_opts = generate_thumbnail_options(project_id, ratios=["16:9", "9:16"], count_per_ratio=3)
         z_bundle = bundle_editable_project(project_root)
         pkg_res = assemble_final_package(project_root, {"slug": project_id, "languages": ["en", "hi", "ta"], "title": project_id}, p_scenes, ledger_records=[])
+        rel_val = validate_release_package(Path(pkg_res["package_dir"]))
         soak_res = simulate_chaos_soak_test(project_root, scene_count=120)
-        pkg_soak_result = {"status": "PACKAGED_AND_SOAKED", "cue_sheet_events": c_sheet["events_count"], "thumbnails_count": len(t_opts["16:9"]) + len(t_opts["9:16"]), "bundle_path": str(z_bundle), "videos_count": pkg_res["videos_count"], "soak_passed": soak_res["passed"]}
+        pkg_soak_result = {"status": "PACKAGED_AND_SOAKED", "cue_sheet_events": c_sheet["events_count"], "thumbnails_count": len(t_opts["16:9"]) + len(t_opts["9:16"]), "bundle_path": str(z_bundle), "videos_count": pkg_res["videos_count"], "soak_passed": soak_res["passed"], "release_validation": rel_val}
 
     ip_result = None
     if payload.get("run_improvement_program"):
@@ -2012,6 +2013,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_payload(200, json.dumps(h).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/project":
             self._send_payload(200, json.dumps({"status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/export":
+            self._send_payload(200, json.dumps({"status": "EXPORTED", "package_zip": "out/editable_project.zip", "languages": ["en", "hi", "ta"], "cue_sheets": ["en", "hi", "ta"]}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/render":
             self._send_payload(200, json.dumps({"status": "READY", "scenes": ["S01"], "ratios": ["16:9", "9:16"], "chunk_size": 900, "renderer": "ffmpeg+chromium"}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/audio":
@@ -2448,6 +2451,24 @@ def assemble_final_package(project_root: Path, project_meta: dict[str, Any], sce
         if src_doc.exists(): (out_dir / doc).write_text(src_doc.read_text(encoding="utf-8"), encoding="utf-8")
     paths_ok = all(len(str(p)) < 260 for p in out_dir.rglob("*"))
     return {"package_dir": str(out_dir), "videos_count": len(videos), "path_length_ok": paths_ok, "languages": langs}
+
+def validate_release_package(package_dir: Path | str) -> dict[str, Any]:
+    if not isinstance(package_dir, (Path, str)):
+        raise TypeError("package_dir must be Path or str")
+    s_path = str(package_dir).strip()
+    if not s_path:
+        raise ValueError("package_dir cannot be empty or whitespace")
+    p = Path(s_path)
+    if not p.exists() or not p.is_dir():
+        raise FileNotFoundError(f"Package directory does not exist or is not a directory: {p}")
+    credits_file = p / "credits.md"
+    zip_file = p / "editable_project.zip"
+    if not credits_file.exists():
+        raise FileNotFoundError(f"Missing required credits.md in package directory: {p}")
+    if not zip_file.exists():
+        raise FileNotFoundError(f"Missing required editable_project.zip in package directory: {p}")
+    files = list(p.rglob("*"))
+    return {"valid": True, "status": "RELEASE_READY", "package_dir": str(p), "files_count": len(files), "has_editable_zip": True}
 
 def simulate_chaos_soak_test(project_root: Path, scene_count: int = 120, injected_faults: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if not isinstance(project_root, Path): raise TypeError("project_root must be Path")

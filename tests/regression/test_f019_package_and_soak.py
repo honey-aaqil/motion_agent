@@ -4,6 +4,7 @@ from pathlib import Path
 from src.pipeline import (
     build_cue_sheet, generate_thumbnail_options, bundle_editable_project,
     assemble_final_package, simulate_chaos_soak_test, run_pipeline,
+    validate_release_package,
 )
 
 def test_f019_invalid_inputs_raise_errors(tmp_path: Path):
@@ -57,3 +58,23 @@ def test_f019_simulate_chaos_soak_test(tmp_path: Path):
 def test_f019_pipeline_wiring(tmp_path: Path):
     res = run_pipeline(tmp_path, {"project_id": "proj_p12_test", "run_packaging_and_soak": True})
     assert res["packaging_and_soak"]["status"] == "PACKAGED_AND_SOAKED" and res["packaging_and_soak"]["videos_count"] == 6 and res["packaging_and_soak"]["soak_passed"] is True
+
+def test_f019_validate_release_package(tmp_path: Path):
+    for bad in (None, 123, []):
+        with pytest.raises(TypeError):
+            validate_release_package(bad)  # type: ignore[arg-type]
+    for bad_str in ("", "   "):
+        with pytest.raises(ValueError):
+            validate_release_package(bad_str)
+    with pytest.raises(FileNotFoundError):
+        validate_release_package(tmp_path / "non_existent_dir")
+
+    meta = {"slug": "black_hole", "languages": ["en", "hi", "ta"], "title": "Black Hole"}
+    scenes = [{"id": "S01", "duration": 8.0, "music": ["drone"], "sfx": []}]
+    pkg = assemble_final_package(tmp_path, meta, scenes, ledger_records=[])
+    res = validate_release_package(Path(pkg["package_dir"]))
+    assert res["valid"] is True
+    assert res["status"] == "RELEASE_READY"
+    assert res["has_editable_zip"] is True
+    assert res["files_count"] > 0
+

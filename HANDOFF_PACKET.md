@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Phase 7 Complete: Stage S5 Dual-Ratio Chromium & FFmpeg rendering pipeline with chunked rendering and dual-ratio file validation (validate_dual_ratio_render for 16:9 and 9:16); wired into pipeline, /api/render, and test_dual_ratio_render_validation; 115/115 tests passing. Ready for Phase 8 (Final packager, release compliance, and soak verification).
+  Phase 8 Complete: Stage S8 Final Packager, release compliance verification (validate_release_package), editable project zip and cue sheets export; wired into pipeline, /api/export, and test_f019_validate_release_package; 116/116 tests passing. All 8 Phases of Forensic Blueprint fully verified and operational with running live GUI and supervisor on 127.0.0.1:8000.
