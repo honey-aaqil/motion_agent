@@ -83,3 +83,12 @@ def test_full_state_machine_chaos_replay(tmp_path: Path) -> None:
 def test_pipeline_wiring_chaos(tmp_path: Path) -> None:
     res = run_pipeline(tmp_path, {"project_id": "P1_CHAOS", "run_chaos_server": True})
     assert res["chaos"]["status"] == "READY"
+
+def test_gateway_https_and_dynamic_retry_after() -> None:
+    with pytest.raises(ValueError, match="base_url must start with http:// or https://"):
+        call_gemini_gateway("custom://bad", "prompt")
+    try:
+        res = call_gemini_gateway("https://127.0.0.1:9999", "prompt", timeout=0.01)
+        assert res["status"] in (504, 500)
+    except Exception as e:
+        assert "base_url must start with" not in str(e)

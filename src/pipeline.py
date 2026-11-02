@@ -477,7 +477,7 @@ def stop_gemini_chaos_server(server: HTTPServer, thread: threading.Thread) -> bo
     return True
 
 def call_gemini_gateway(base_url: str, prompt: str, model_id: str = "gemini-2.5-flash", chaos_mode: str | None = None, timeout: float = 5.0, conn: sqlite3.Connection | None = None, project_id: str = "default_proj") -> dict[str, Any]:
-    if not isinstance(base_url, str) or not base_url.startswith("http://"): raise ValueError("base_url must start with http://")
+    if not isinstance(base_url, str) or not (base_url.startswith("http://") or base_url.startswith("https://")): raise ValueError("base_url must start with http:// or https://")
     if not isinstance(prompt, str): raise TypeError("prompt must be a string")
     if not prompt.strip(): raise ValueError("prompt cannot be empty")
     if not isinstance(model_id, str): raise TypeError("model_id must be a string")
@@ -499,7 +499,9 @@ def call_gemini_gateway(base_url: str, prompt: str, model_id: str = "gemini-2.5-
             return {"status": 503, "error": "503_OVERLOAD", "retryable": True}
         if err.code == 429:
             is_day = "per day" in body.lower() or "requests per day" in body.lower()
-            return {"status": 429, "error": "QUOTA_SLEEP_UNTIL_RESET" if is_day else "429_RATE_LIMIT", "retryable": not is_day, "wait_sec": 86400.0 if is_day else 62.0}
+            ra = err.headers.get("Retry-After") if hasattr(err, "headers") and err.headers else None
+            wait_s = float(ra) if ra and ra.strip().isdigit() else (86400.0 if is_day else 62.0)
+            return {"status": 429, "error": "QUOTA_SLEEP_UNTIL_RESET" if is_day else "429_RATE_LIMIT", "retryable": not is_day, "wait_sec": wait_s}
         return {"status": err.code, "error": f"HTTP_{err.code}", "retryable": False}
     except (urllib.error.URLError, TimeoutError, OSError):
         latency = (time.time() - t0) * 1000.0
@@ -757,7 +759,7 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         durable_replace(c_tmp, c_path)
         bg_sample = payload.get("bg_remove_sample", b"DEFAULT_PNG_DATA")
         bg_res = remove_background_cached(bg_sample, project_root / "cache" / "rembg")
-        al_result = {"status": "READY", "total_assets": len(ledger.list_assets()), "action_needed": actions, "ledger_path": str(ledger_path), "credits_path": str(c_path), "bg_removal": bg_res}
+        al_result = {"status": "READY", "total_assets": len(ledger.list_assets()), "action_needed": actions, "ledger_path": str(ledger_path), "credits_path": str(c_path), "bg_removal": bg_res, "license_summary": ledger.get_license_summary()}
 
     timing_result = None
     if payload.get("run_timing"):
@@ -1340,6 +1342,20 @@ class AssetLedger:
     def get_asset(self, asset_id: str) -> dict[str, Any] | None:
         return self.assets.get(str(asset_id))
 
+    def get_license_summary(self) -> dict[str, Any]:
+        total = len(self.assets)
+        accepted = [a for a in self.assets.values() if a.get("status") == "ACCEPTED"]
+        rejected = [a for a in self.assets.values() if a.get("status") == "REJECTED"]
+        attrib = [a for a in self.assets.values() if a.get("attribution_required") is True]
+        return {
+            "total_assets": total,
+            "accepted_count": len(accepted),
+            "rejected_count": len(rejected),
+            "attribution_count": len(attrib),
+            "all_compliant": total > 0 and len(rejected) == 0,
+            "license_ids": sorted(list({str(a.get("license_id", "Unknown")) for a in self.assets.values()})),
+        }
+
     def list_assets(self, scene: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         return [a for a in self.assets.values() if (scene is None or a.get("scene") == scene) and (status is None or a.get("status") == status)]
 
@@ -1809,6 +1825,17 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_payload(200, json.dumps(h).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/project":
             self._send_payload(200, json.dumps({"status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/licenses":
+            self._send_payload(200, json.dumps({"status": "OK", "approved_licenses": ["CC0", "Public Domain", "CC-BY", "Unsplash", "Pixabay", "Pexels", "Mixkit", "Coverr", "OFL", "MIT", "Apache-2.0"]}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/rate_governor":
+            c_today = 0
+            if db_p and Path(db_p).is_file():
+                try:
+                    c = sqlite3.connect(f"file:{Path(db_p).as_posix()}?mode=ro", uri=True)
+                    c_today = c.execute("SELECT COUNT(*) FROM api_rate_ledger WHERE created_at >= ?", (time.time() - 86400.0,)).fetchone()[0]
+                    c.close()
+                except Exception: pass
+            self._send_payload(200, json.dumps({"status": "OK", "calls_today": c_today, "daily_cap": 20, "min_interval_sec": 15.5}).encode("utf-8"), "application/json; charset=utf-8")
         else:
             self._send_payload(404, b'{"error": "not found"}', "application/json")
 

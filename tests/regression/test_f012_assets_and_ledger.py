@@ -50,6 +50,9 @@ def test_asset_ledger_crud_and_export(tmp_path: Path) -> None:
     ledger.add_asset(rec2)
     assert ledger.get_asset("A1")["author"] == "Jane" and ledger.get_asset("A9") is None
     assert len(ledger.list_assets(scene="S01")) == 2 and len(ledger.list_assets(status="REJECTED")) == 0
+    summ = ledger.get_license_summary()
+    assert summ["total_assets"] == 2 and summ["accepted_count"] == 2 and summ["all_compliant"] is True
+    assert "Unsplash" in summ["license_ids"] and "Mixkit" in summ["license_ids"]
     p = ledger.export_ledger(tmp_path)
     assert p.exists() and p.name == "assets_ledger.json"
     data = json.loads(p.read_text(encoding="utf-8"))
