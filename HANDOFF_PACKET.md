@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Phase 2 Complete: Gemini gateway supports https:// and dynamic Retry-After parsing on HTTP 429; AssetLedger implements get_license_summary() with allowlist compliance tracking; dashboard API serves /api/licenses and /api/rate_governor; 110/110 tests passing. Ready for Phase 3 (Supervisor and Interactive GUI Form Handling).
+  Phase 3 Complete: Single-command supervisor (run_supervisor_tick) coordinates SQLite state transitions, queue accounting, and host telemetry; dashboard server supports interactive /api/script ingest and /api/approval1-2 form processing; run_gui.py acts as unified supervisor & GUI launcher; 111/111 tests passing. Ready for Phase 4 (Stage S1 Script Ingest & Approval 1 flow).

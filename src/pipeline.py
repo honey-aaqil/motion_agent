@@ -828,6 +828,10 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         o_res = run_watchdog_observer(work_dir / f"{project_id}.db", work_dir / "status.html")
         dw_result = {"status": "READY", "health": h_info, "dashboard_html_len": len(d_html), "conditions": w_conds, "dead_man": d_ms, "task_cmd": a_cmd, "observer": o_res}
 
+    sup_res = None
+    if payload.get("run_supervisor"):
+        sup_res = run_supervisor_tick(work_dir / f"{project_id}.db")
+
     dash_srv_res = None
     if payload.get("run_dashboard_server"):
         srv, th, u = start_dashboard_server(host="127.0.0.1", port=0, db_path=work_dir / f"{project_id}.db")
@@ -942,6 +946,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["eval_harness"] = eval_result
     if dw_result is not None:
         ret["dashboard_watchdog"] = dw_result
+    if sup_res is not None:
+        ret["supervisor"] = sup_res
     if dash_srv_res is not None:
         ret["dashboard_server"] = dash_srv_res
     if ed_result is not None:
@@ -1770,7 +1776,7 @@ def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, A
         f"<div class='card'><h3>Project Controls & Fast Ingest</h3>"
         f"<div style='display:flex;gap:10px;margin-bottom:8px;'><input id='inp_id' placeholder='Project ID' value='{project_meta.get('project_id', '')}' style='background:#0f172a;border:1px solid #334155;color:#fff;padding:6px 10px;border-radius:6px;flex:1;'/>"
         f"<input id='inp_title' placeholder='Title' value='{project_meta.get('title', '')}' style='background:#0f172a;border:1px solid #334155;color:#fff;padding:6px 10px;border-radius:6px;flex:2;'/>"
-        f"<button class='btn' onclick='saveProject()'>Save Project</button></div></div>"
+        f"<button class='btn' onclick='saveProject()'>Save Project</button></div><textarea id='inp_script' placeholder='[SCENE 1: HOOK] | VO: Paste script here...' style='width:100%;height:50px;background:#0f172a;border:1px solid #334155;color:#fff;padding:6px 10px;border-radius:6px;box-sizing:border-box;margin-bottom:8px;font-family:monospace;font-size:12px;'></textarea><button class='btn' style='background:#059669;' onclick='ingestScript()'>Ingest AV Script (Stage 1)</button><span id='ingest-msg' style='margin-left:10px;font-weight:bold;color:#34d399;'></span></div>"
         f"<div class='card' style='border-left:4px solid #3b82f6;'><h3>Approval 1 Checkpoint: Two-Column Script & Narration Gate</h3>"
         f"<p style='color:#94a3b8;font-size:13px;margin:2px 0 8px;'>Verifies verbatim voice-over invariance, line count, and Unicode NFC normalization.</p>"
         f"<div><button class='btn' onclick='submitApproval(1, \"APPROVED\")'>Approve Script (Stage 1)</button>"
@@ -1788,6 +1794,7 @@ def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, A
         f"<div id='actions'><ul style='display:none;'>{act_items}</ul><ul>{act_rows}</ul></div></div></div>"
         f"<script>"
         f"async function saveProject(){{const pid=document.getElementById('inp_id').value;const t=document.getElementById('inp_title').value;await fetch('/api/project',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,title:t}})}});location.reload();}}"
+        f"async function ingestScript(){{const pid=document.getElementById('inp_id').value||'P01';const s=document.getElementById('inp_script').value;const res=await fetch('/api/script',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,script_text:s}})}});const d=await res.json();document.getElementById('ingest-msg').innerText='[Ingested: '+d.scene_count+' scenes]';setTimeout(()=>location.reload(),800);}}"
         f"async function submitApproval(st,dec){{const pid='{project_meta.get('project_id', 'P01')}';const res=await fetch('/api/approval'+st,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,decision:dec}})}});const d=await res.json();document.getElementById('app'+st+'-msg').innerText='[Status: '+d.status+']';}}"
         f"</script></body></html>"
     )
@@ -1853,18 +1860,35 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 conn.commit()
                 conn.close()
             self._send_payload(200, json.dumps({"status": "CREATED", "project_id": pid, "title": title}).encode("utf-8"), "application/json")
+        elif path == "/api/script":
+            pid = str(body.get("project_id", "P01")).strip() or "P01"
+            txt = str(body.get("script_text", "")).strip()
+            parsed = parse_av_script(txt) if txt else {"scenes": []}
+            sc_count = len(parsed["scenes"])
+            if db_p:
+                conn = init_database(db_p)
+                conn.execute("INSERT OR REPLACE INTO projects (project_id, title, status, created_at, updated_at) VALUES (?, ?, 'AWAITING_APPROVAL_1', ?, ?)", (pid, "Script Ingest", time.time(), time.time()))
+                for s in parsed["scenes"]:
+                    sid = str(s.get("id") or s.get("scene_id") or "S01")
+                    sidx = int(sid.replace("S", "")) if sid.replace("S", "").isdigit() else 1
+                    conn.execute("INSERT OR REPLACE INTO scenes (scene_id, project_id, scene_index, status, calls_used, locked_until, draft_spec_json, updated_at) VALUES (?, ?, ?, 'STAGE1_SCRIPT_READY', 0, 0, ?, ?)", (sid, pid, sidx, json.dumps(s), time.time()))
+                conn.commit()
+                conn.close()
+            self._send_payload(200, json.dumps({"status": "INGESTED", "project_id": pid, "scene_count": max(1, sc_count)}).encode("utf-8"), "application/json")
         elif path in ("/api/approval1", "/api/approval2"):
             st = 1 if "approval1" in path else 2
             pid, dec = str(body.get("project_id", "P01")), str(body.get("decision", "APPROVED"))
             if db_p and Path(db_p).is_file():
                 try:
                     conn = init_database(db_p)
-                    conn.execute("UPDATE projects SET status = ? WHERE project_id = ?", (f"APPROVAL_{st}_{dec}", pid))
+                    conn.execute("UPDATE projects SET status = ?, updated_at = ? WHERE project_id = ?", (f"APPROVAL_{st}_{dec}", time.time(), pid))
+                    if dec == "APPROVED":
+                        conn.execute("UPDATE scenes SET status = 'SCENE_READY', updated_at = ? WHERE project_id = ?", (time.time(), pid))
                     conn.commit()
                     conn.close()
                 except Exception:
                     pass
-            self._send_payload(200, json.dumps({"stage": st, "decision": dec, "status": "RECORDED"}).encode("utf-8"), "application/json")
+            self._send_payload(200, json.dumps({"stage": st, "project_id": pid, "decision": dec, "status": "RECORDED"}).encode("utf-8"), "application/json")
         else:
             self._send_payload(404, b'{"error": "not found"}', "application/json")
 
@@ -1892,6 +1916,24 @@ def stop_dashboard_server(server: HTTPServer, thread: threading.Thread) -> bool:
     server.server_close()
     thread.join(timeout=2.0)
     return True
+
+def run_supervisor_tick(db_path: Path | str) -> dict[str, Any]:
+    if not isinstance(db_path, (str, Path)):
+        raise TypeError("db_path must be Path or str")
+    conn = init_database(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT project_id, status FROM projects ORDER BY updated_at DESC LIMIT 5;")
+    projects = [{"project_id": str(r[0]), "status": str(r[1])} for r in cur.fetchall()]
+    cur.execute("SELECT COUNT(*) FROM llm_queue WHERE status = 'PENDING';")
+    q_pending = int(cur.fetchone()[0])
+    health = get_machine_health(db_path)
+    conn.close()
+    return {
+        "status": "TICK_COMPLETED",
+        "active_projects": projects,
+        "queue_pending": q_pending,
+        "health": health,
+    }
 
 def check_watchdog_conditions(health: dict[str, Any], conn: sqlite3.Connection | None = None, now: float | None = None) -> list[str]:
     if not isinstance(health, dict): raise TypeError("health must be dict")

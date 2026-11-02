@@ -7,7 +7,8 @@ from src.pipeline import (
     check_watchdog_conditions, evaluate_alert_throttling,
     generate_autostart_task_cmd, get_machine_health, init_database,
     render_dashboard_html, run_pipeline, run_watchdog_observer,
-    schedule_dead_man_switch, start_dashboard_server, stop_dashboard_server
+    schedule_dead_man_switch, start_dashboard_server, stop_dashboard_server,
+    run_supervisor_tick
 )
 
 def test_invalid_inputs_raise_explicit_errors() -> None:
@@ -18,7 +19,7 @@ def test_invalid_inputs_raise_explicit_errors() -> None:
         (evaluate_alert_throttling, ("c", "bad", 0.0)), (evaluate_alert_throttling, ("c", {}, "bad")),
         (schedule_dead_man_switch, (123,)), (generate_autostart_task_cmd, (123, "cmd")),
         (generate_autostart_task_cmd, ("task", 123)), (run_watchdog_observer, (123, "out.html")),
-        (run_watchdog_observer, ("db.db", 123))
+        (run_watchdog_observer, ("db.db", 123)), (run_supervisor_tick, (123,))
     ):
         with pytest.raises(TypeError):
             f(*a)  # type: ignore[arg-type]
@@ -102,12 +103,33 @@ def test_dashboard_server_and_gui_endpoints(tmp_path: Path) -> None:
         req_p = urllib.request.Request(f"{base_url}/api/project", data=b'{"project_id":"P99","title":"GUI Test"}', headers={"Content-Type":"application/json"}, method="POST")
         with urllib.request.urlopen(req_p, timeout=3.0) as resp:
             assert resp.status == 200 and json.loads(resp.read().decode("utf-8"))["status"] == "CREATED"
+        req_s = urllib.request.Request(f"{base_url}/api/script", data=b'{"project_id":"P99","script_text":"[SCENE 1: HOOK] | VO: Welcome to quantum motion."}', headers={"Content-Type":"application/json"}, method="POST")
+        with urllib.request.urlopen(req_s, timeout=3.0) as resp:
+            s_data = json.loads(resp.read().decode("utf-8"))
+            assert resp.status == 200 and s_data["status"] == "INGESTED" and s_data["scene_count"] >= 1
         req_a = urllib.request.Request(f"{base_url}/api/approval1", data=b'{"project_id":"P99","decision":"APPROVED"}', headers={"Content-Type":"application/json"}, method="POST")
         with urllib.request.urlopen(req_a, timeout=3.0) as resp:
             assert resp.status == 200 and json.loads(resp.read().decode("utf-8"))["decision"] == "APPROVED"
+        req_a2 = urllib.request.Request(f"{base_url}/api/approval2", data=b'{"project_id":"P99","decision":"APPROVED"}', headers={"Content-Type":"application/json"}, method="POST")
+        with urllib.request.urlopen(req_a2, timeout=3.0) as resp:
+            assert resp.status == 200 and json.loads(resp.read().decode("utf-8"))["stage"] == 2
     finally:
         stopped = stop_dashboard_server(srv, th)
         assert stopped is True
 
     pipe_res = run_pipeline(tmp_path, {"project_id": "P_GUI", "run_dashboard_server": True})
     assert pipe_res["dashboard_server"]["status"] == "SERVER_READY"
+
+def test_supervisor_tick_and_pipeline_wiring(tmp_path: Path) -> None:
+    db_p = tmp_path / "sup_test.db"
+    conn = init_database(db_p)
+    conn.execute("INSERT OR REPLACE INTO projects VALUES ('P01', 'Sup Proj', 'VIDEO_NEW', 1.0, 1.0)")
+    conn.commit()
+    conn.close()
+    tick = run_supervisor_tick(db_p)
+    assert isinstance(tick, dict) and tick["status"] == "TICK_COMPLETED"
+    assert len(tick["active_projects"]) >= 1 and tick["queue_pending"] == 0
+    assert "health" in tick and "available_ram_mb" in tick["health"]
+    res = run_pipeline(tmp_path, {"project_id": "P_SUP", "run_supervisor": True})
+    assert "supervisor" in res and res["supervisor"]["status"] == "TICK_COMPLETED"
+
