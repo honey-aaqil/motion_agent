@@ -740,9 +740,10 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         parsed_res = parse_av_script(s_txt, vo_extra=payload.get("vo_extra"))
         _ = normalize_sacred_vo(s_txt)
         _ = rebuild_vo_text(parsed_res["scenes"], lang="en")
+        vo_gate = validate_sacred_vo_gate(s_txt, parsed_res["scenes"])
         ap_res = generate_audio_pack(parsed_res["scenes"], project_meta=payload.get("project_meta"))
         exp_res = export_audio_pack(ap_res, project_root)
-        pap_result = {"status": "PARSED_AND_PACKED", "parsed": parsed_res, "audio_pack": ap_res, "export": exp_res}
+        pap_result = {"status": "PARSED_AND_PACKED", "parsed": parsed_res, "audio_pack": ap_res, "export": exp_res, "vo_gate": vo_gate}
 
     al_result = None
     if payload.get("run_assets_and_ledger"):
@@ -1225,6 +1226,34 @@ def rebuild_vo_text(scenes: list[dict[str, Any]], lang: str = "en") -> str:
     if lang not in ("en", "hi", "ta"):
         raise ValueError(f"Unsupported language '{lang}'. Must be one of en, hi, ta.")
     return "\n".join([sc.get("vo", {}).get(lang, "") for sc in scenes if sc.get("vo", {}).get(lang, "")])
+
+def validate_sacred_vo_gate(raw_script: str, parsed_scenes: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(raw_script, str) or not isinstance(parsed_scenes, list):
+        raise TypeError("raw_script must be str and parsed_scenes must be list")
+    if not parsed_scenes:
+        raise ValueError("parsed_scenes cannot be empty")
+    all_nfc = True
+    total_vo_lines = 0
+    total_chars = 0
+    for sc in parsed_scenes:
+        if not isinstance(sc, dict):
+            raise TypeError("each scene must be a dict")
+        vo = sc.get("vo", {})
+        if isinstance(vo, dict):
+            for lk, txt in vo.items():
+                if txt and isinstance(txt, str):
+                    total_vo_lines += 1
+                    total_chars += len(txt)
+                    if not unicodedata.is_normalized("NFC", txt):
+                        all_nfc = False
+    passed = all_nfc and total_vo_lines > 0
+    return {
+        "passed": passed,
+        "nfc_normalized": all_nfc,
+        "scene_count": len(parsed_scenes),
+        "total_vo_lines": total_vo_lines,
+        "total_chars": total_chars,
+    }
 
 def generate_audio_pack(scenes: list[dict[str, Any]], project_meta: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(scenes, list):
@@ -1874,7 +1903,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     conn.execute("INSERT OR REPLACE INTO scenes (scene_id, project_id, scene_index, status, calls_used, locked_until, draft_spec_json, updated_at) VALUES (?, ?, ?, 'STAGE1_SCRIPT_READY', 0, 0, ?, ?)", (sid, pid, sidx, json.dumps(s), time.time()))
                 conn.commit()
                 conn.close()
-            self._send_payload(200, json.dumps({"status": "INGESTED", "project_id": pid, "scene_count": max(1, sc_count)}).encode("utf-8"), "application/json")
+            vo_gate = validate_sacred_vo_gate(txt, parsed["scenes"]) if parsed["scenes"] else {"passed": False, "nfc_normalized": False}
+            self._send_payload(200, json.dumps({"status": "INGESTED", "project_id": pid, "scene_count": max(1, sc_count), "vo_gate": vo_gate}).encode("utf-8"), "application/json")
         elif path in ("/api/approval1", "/api/approval2"):
             st = 1 if "approval1" in path else 2
             pid, dec = str(body.get("project_id", "P01")), str(body.get("decision", "APPROVED"))

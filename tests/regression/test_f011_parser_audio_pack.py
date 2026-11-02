@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 from src.pipeline import (
     normalize_sacred_vo, parse_av_script, rebuild_vo_text,
-    generate_audio_pack, export_audio_pack, run_pipeline
+    generate_audio_pack, export_audio_pack, run_pipeline,
+    validate_sacred_vo_gate
 )
 
 SAMPLE_SCRIPT = (
@@ -74,3 +75,24 @@ def test_pipeline_integration(tmp_path: Path) -> None:
     assert res["project_id"] == "P4_TEST"
     assert res["parser_audio_pack"]["parsed"]["total_scenes"] == 3
     assert (tmp_path / "audio_pack" / "audio_pack.json").exists()
+
+def test_sacred_vo_gate_invariance() -> None:
+    with pytest.raises(TypeError):
+        validate_sacred_vo_gate(123, [])  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        validate_sacred_vo_gate("script", "not_a_list")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="parsed_scenes cannot be empty"):
+        validate_sacred_vo_gate("script", [])
+    
+    parsed = parse_av_script(SAMPLE_SCRIPT)
+    res = validate_sacred_vo_gate(SAMPLE_SCRIPT, parsed["scenes"])
+    assert isinstance(res, dict) and res["passed"] is True
+    assert res["nfc_normalized"] is True
+    assert res["scene_count"] == 3
+    assert res["total_vo_lines"] >= 3
+    
+    import unicodedata
+    decomposed = unicodedata.normalize("NFD", "Café résumé")
+    bad_scenes = [{"id": "S01", "vo": {"en": decomposed}}]
+    bad_res = validate_sacred_vo_gate("dummy", bad_scenes)
+    assert bad_res["passed"] is False and bad_res["nfc_normalized"] is False

@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Phase 3 Complete: Single-command supervisor (run_supervisor_tick) coordinates SQLite state transitions, queue accounting, and host telemetry; dashboard server supports interactive /api/script ingest and /api/approval1-2 form processing; run_gui.py acts as unified supervisor & GUI launcher; 111/111 tests passing. Ready for Phase 4 (Stage S1 Script Ingest & Approval 1 flow).
+  Phase 4 Complete: Stage S1 sacred VO gate (validate_sacred_vo_gate) enforces verbatim voice-over invariance, Unicode NFC normalization across all languages, and zero line drops; integrated into pipeline and /api/script dashboard endpoint; 112/112 tests passing. Ready for Phase 5 (Stage S2 OpenFilm DOM Template engine & Asset Resolution).
