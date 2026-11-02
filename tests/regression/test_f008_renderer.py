@@ -15,6 +15,7 @@ from src.pipeline import (
     get_chromium_render_flags,
     render_scene_chunk,
     run_pipeline,
+    validate_dual_ratio_render,
 )
 
 def test_compute_render_chunks_and_rejections() -> None:
@@ -85,4 +86,29 @@ def test_render_scene_chunk_and_pipeline_wiring(tmp_path: Path) -> None:
     payload = {"project_id": "P_RENDER", "render_chunking": {"total_frames": 950, "scene_id": "S02"}}
     out = run_pipeline(tmp_path, payload)
     assert "renderer" in out and out["renderer"]["chunks_count"] == 2
+
+def test_dual_ratio_render_validation(tmp_path: Path) -> None:
+    for bad in (None, 123, []):
+        with pytest.raises(TypeError):
+            validate_dual_ratio_render(bad, tmp_path / "out.mp4")  # type: ignore[arg-type]
+        with pytest.raises(TypeError):
+            validate_dual_ratio_render(tmp_path / "out.mp4", bad)  # type: ignore[arg-type]
+    for bad_str in ("", "   "):
+        with pytest.raises(ValueError):
+            validate_dual_ratio_render(bad_str, tmp_path / "out.mp4")
+        with pytest.raises(ValueError):
+            validate_dual_ratio_render(tmp_path / "out.mp4", bad_str)
+
+    p1 = tmp_path / "land.mp4"
+    p2 = tmp_path / "port.mp4"
+    with pytest.raises(FileNotFoundError):
+        validate_dual_ratio_render(p1, p2)
+
+    p1.write_bytes(b"\x00" * 128)
+    p2.write_bytes(b"\x00" * 128)
+    res = validate_dual_ratio_render(p1, p2)
+    assert res["valid"] is True
+    assert res["status"] == "VERIFIED"
+    assert res["landscape_size"] == 128
+    assert res["portrait_size"] == 128
 
