@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from src.pipeline import (
     align_sentence_anchors, build_whisper_alignment_cmd, compute_scene_timing,
-    measure_audio_duration_ffprobe, resolve_cue_timing, run_pipeline, validate_uploaded_audio_files
+    measure_audio_duration_ffprobe, resolve_cue_timing, run_pipeline, validate_uploaded_audio_files,
+    validate_whisper_alignment_output
 )
 
 def test_invalid_inputs_raise_explicit_errors() -> None:
@@ -70,4 +71,31 @@ def test_cues_multilingual_and_pipeline(tmp_path: Path) -> None:
     payload = {"project_id": "p6_proj", "run_timing": True, "vo_text": "S1. S2.", "audio_duration": 6.0, "uploaded_audio_files": ["S01.en.wav", "S02.en.mp3"], "expected_scenes": ["S01", "S02"], "cues": [{"id": "c1", "anchor": "@s2.start+0.2s"}], "measure_audio_file": str(w_file)}
     out = run_pipeline(tmp_path, payload)
     assert "timing" in out and out["timing"]["status"] == "TIMED" and len(out["timing"]["resolved_cues"]) == 1
+
+def test_whisper_alignment_validation() -> None:
+    with pytest.raises(TypeError):
+        validate_whisper_alignment_output(123, "text")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        validate_whisper_alignment_output({}, 123)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="expected_text cannot be empty"):
+        validate_whisper_alignment_output({}, "")
+
+    w_data = {
+        "transcription": [
+            {"timestamps": {"from": "00:00:00,000", "to": "00:00:02,500"}, "text": "Every black hole begins as a star.", "tokens": [{"text": "Every", "p": 0.98}, {"text": "star", "p": 0.95}]}
+        ]
+    }
+    v_res = validate_whisper_alignment_output(w_data, "Every black hole begins as a star.")
+    assert isinstance(v_res, dict) and v_res["valid"] is True
+    assert v_res["confidence_score"] >= 0.90 and v_res["has_drift"] is False
+    assert len(v_res["segments"]) == 1 and v_res["segments"][0]["duration"] == 2.5
+
+    # Test drift detection when end timestamp exceeds audio bound or jumps backwards
+    drift_data = {
+        "transcription": [
+            {"timestamps": {"from": "00:00:03,000", "to": "00:00:01,000"}, "text": "Reversed timestamps."}
+        ]
+    }
+    d_res = validate_whisper_alignment_output(drift_data, "Reversed timestamps.")
+    assert d_res["valid"] is False and d_res["has_drift"] is True
 

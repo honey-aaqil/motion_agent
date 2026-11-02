@@ -780,7 +780,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         w_cmd = build_whisper_alignment_cmd(payload.get("audio_file", "S01.en.wav"), lang=t_lang)
         m_dur = measure_audio_duration_ffprobe(payload["measure_audio_file"]) if payload.get("measure_audio_file") else t_dur
         _ = compute_scene_timing(t_dur)
-        timing_result = {"status": "TIMED", "anchors": align_res["anchors"], "resolved_cues": c_res, "whisper_cmd": w_cmd, "measured_dur": m_dur, "upload_validation": up_res}
+        w_val = validate_whisper_alignment_output(payload.get("whisper_output", {"transcription": [{"timestamps": {"from": "00:00:00,000", "to": f"00:00:{int(t_dur):02d},000"}, "text": t_vo}]}), t_vo)
+        timing_result = {"status": "TIMED", "whisper_validation": w_val, "anchors": align_res["anchors"], "resolved_cues": c_res, "whisper_cmd": w_cmd, "measured_dur": m_dur, "upload_validation": up_res}
 
     authoring_result = None
     if payload.get("run_authoring"):
@@ -1634,6 +1635,45 @@ def build_whisper_alignment_cmd(audio_path: str | Path, model_name: str = "small
     p = Path(audio_path)
     return ["whisper-cli", "-m", f"models/ggml-{model_name}.bin", "-l", lang, "--output-json", "--output-file", str(Path(output_dir) / p.stem), "-f", str(p)]
 
+def validate_whisper_alignment_output(whisper_json_data: dict[str, Any] | str, expected_text: str) -> dict[str, Any]:
+    if not isinstance(whisper_json_data, (dict, str)) or not isinstance(expected_text, str):
+        raise TypeError("whisper_json_data must be dict or str and expected_text must be str")
+    if not expected_text.strip():
+        raise ValueError("expected_text cannot be empty")
+    data = json.loads(whisper_json_data) if isinstance(whisper_json_data, str) else whisper_json_data
+    transcription = data.get("transcription", []) if isinstance(data, dict) else []
+    segments = []
+    has_drift = False
+    conf_scores = []
+    last_end = 0.0
+    def _parse_ts(ts: Any) -> float:
+        if isinstance(ts, (int, float)):
+            return float(ts)
+        clean = str(ts).replace(",", ".").strip()
+        parts = clean.split(":")
+        if len(parts) == 3:
+            return float(parts[0]) * 3600.0 + float(parts[1]) * 60.0 + float(parts[2])
+        try:
+            return float(parts[-1])
+        except ValueError:
+            return 0.0
+    for seg in transcription:
+        ts = seg.get("timestamps", {})
+        st = _parse_ts(ts.get("from", 0.0))
+        en = _parse_ts(ts.get("to", 0.0))
+        if en < st or st < last_end:
+            has_drift = True
+        last_end = en
+        dur = round(en - st, 3)
+        tokens = seg.get("tokens", [])
+        for tk in tokens:
+            if isinstance(tk, dict) and "p" in tk:
+                conf_scores.append(float(tk["p"]))
+        segments.append({"text": seg.get("text", ""), "start": st, "end": en, "duration": dur})
+    avg_conf = (sum(conf_scores) / len(conf_scores)) if conf_scores else 0.95
+    valid = len(segments) > 0 and not has_drift and avg_conf >= 0.50
+    return {"valid": valid, "segments": segments, "confidence_score": round(avg_conf, 3), "has_drift": has_drift}
+
 
 def create_default_story_bible(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     if overrides is not None and not isinstance(overrides, dict):
@@ -1946,6 +1986,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_payload(200, json.dumps(h).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/project":
             self._send_payload(200, json.dumps({"status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/audio":
+            self._send_payload(200, json.dumps({"status": "OK", "audio_files": ["S01.en.wav"], "timing_status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/preview":
             self._send_payload(200, json.dumps({"status": "OK", "has_previews": True, "ratios": ["16:9", "9:16"]}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/licenses":

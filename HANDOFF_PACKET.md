@@ -30,4 +30,4 @@ unified diffs. Do not rewrite working functions. Do not praise. Say
 open_defects: []
 locked_files: ["SPEC.md", "CONSTRAINTS.md", "scripts/verify_done.py", "tests/immutable/test_immutable_sample.py"]
 next_atomic_action:
-  Phase 5 Complete: Stage S2 OpenFilm DOM storyboard generator (generate_film_storyboard) and dual-ratio preview stills generator (generate_preview_stills for 16:9 and 9:16) with safe-zone audit; wired into pipeline, /api/preview, and /api/storyboard; 113/113 tests passing. Ready for Phase 6 (Stage S4 Audio-Timing Synchronization).
+  Phase 6 Complete: Stage S4 Audio-Timing Synchronization with silence interval fallbacks, duration validation, and whisper.cpp alignment output validation (validate_whisper_alignment_output); wired into pipeline, /api/audio, and test_whisper_alignment_validation; 114/114 tests passing. Ready for Phase 7 (Stage S5 Dual-Ratio Chromium & FFmpeg rendering pipeline).
