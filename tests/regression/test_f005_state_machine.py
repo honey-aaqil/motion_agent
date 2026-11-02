@@ -1,7 +1,7 @@
 """Regression tests for Phase P1 / Feature F-005: SQLite schema, state machine, and leases."""
 from __future__ import annotations
 from pathlib import Path
-import pytest
+import pytest, sqlite3
 from src.pipeline import (
     acquire_scene_lease, classify_error_routing, init_database,
     reclaim_expired_leases, release_scene_lease, renew_scene_lease,
@@ -14,7 +14,8 @@ def test_init_database_and_schema_pragmas(tmp_path: Path) -> None:
     conn = init_database(tmp_path / "app.db")
     try:
         cur = conn.cursor()
-        assert str(cur.execute("PRAGMA journal_mode;").fetchone()[0]).lower() == "wal"
+        exp_jm = "wal" if sqlite3.sqlite_version_info >= (3, 50, 7) else "truncate"
+        assert str(cur.execute("PRAGMA journal_mode;").fetchone()[0]).lower() == exp_jm
         assert int(cur.execute("PRAGMA foreign_keys;").fetchone()[0]) == 1
         tables = {r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()}
         for t in ("projects", "scenes", "scene_attempts", "api_rate_ledger", "editor_events"):

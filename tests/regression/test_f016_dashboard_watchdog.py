@@ -2,11 +2,12 @@
 from __future__ import annotations
 from pathlib import Path
 import pytest
+import json, urllib.request
 from src.pipeline import (
     check_watchdog_conditions, evaluate_alert_throttling,
     generate_autostart_task_cmd, get_machine_health, init_database,
     render_dashboard_html, run_pipeline, run_watchdog_observer,
-    schedule_dead_man_switch
+    schedule_dead_man_switch, start_dashboard_server, stop_dashboard_server
 )
 
 def test_invalid_inputs_raise_explicit_errors() -> None:
@@ -75,3 +76,38 @@ def test_watchdog_observer_and_pipeline(tmp_path: Path) -> None:
     assert obs_res["status"] == "OK" and out_h.is_file() and "Motion Agent Status" in out_h.read_text(encoding="utf-8")
     pipe_res = run_pipeline(tmp_path, {"project_id": "P_OBS", "run_dashboard_watchdog": True})
     assert pipe_res["dashboard_watchdog"]["status"] == "READY"
+
+def test_dashboard_server_and_gui_endpoints(tmp_path: Path) -> None:
+    db_p = tmp_path / "gui_test.db"
+    conn = init_database(db_p)
+    conn.close()
+    with pytest.raises(ValueError):
+        start_dashboard_server(port=-1)
+    with pytest.raises(TypeError):
+        start_dashboard_server(port="bad")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        stop_dashboard_server("bad", "bad")  # type: ignore[arg-type]
+
+    srv, th, base_url = start_dashboard_server(host="127.0.0.1", port=0, db_path=db_p)
+    try:
+        assert base_url.startswith("http://127.0.0.1:")
+        with urllib.request.urlopen(f"{base_url}/", timeout=3.0) as resp:
+            body = resp.read().decode("utf-8")
+            assert resp.status == 200
+            assert "Motion Agent Dashboard" in body
+            assert "Approval 1" in body
+        with urllib.request.urlopen(f"{base_url}/api/health", timeout=3.0) as resp:
+            h_json = json.loads(resp.read().decode("utf-8"))
+            assert resp.status == 200 and "available_ram_mb" in h_json
+        req_p = urllib.request.Request(f"{base_url}/api/project", data=b'{"project_id":"P99","title":"GUI Test"}', headers={"Content-Type":"application/json"}, method="POST")
+        with urllib.request.urlopen(req_p, timeout=3.0) as resp:
+            assert resp.status == 200 and json.loads(resp.read().decode("utf-8"))["status"] == "CREATED"
+        req_a = urllib.request.Request(f"{base_url}/api/approval1", data=b'{"project_id":"P99","decision":"APPROVED"}', headers={"Content-Type":"application/json"}, method="POST")
+        with urllib.request.urlopen(req_a, timeout=3.0) as resp:
+            assert resp.status == 200 and json.loads(resp.read().decode("utf-8"))["decision"] == "APPROVED"
+    finally:
+        stopped = stop_dashboard_server(srv, th)
+        assert stopped is True
+
+    pipe_res = run_pipeline(tmp_path, {"project_id": "P_GUI", "run_dashboard_server": True})
+    assert pipe_res["dashboard_server"]["status"] == "SERVER_READY"

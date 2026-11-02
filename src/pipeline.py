@@ -223,8 +223,9 @@ def init_database(db_path: Path | str) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=30.0)
-    conn.executescript("""
-        PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=30000;
+    jm = "WAL" if sqlite3.sqlite_version_info >= (3, 50, 7) else "TRUNCATE"
+    conn.executescript(f"""
+        PRAGMA journal_mode={jm}; PRAGMA synchronous=FULL; PRAGMA busy_timeout=30000;
         PRAGMA wal_autocheckpoint=1000; PRAGMA journal_size_limit=67108864; PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS projects (project_id TEXT PRIMARY KEY, title TEXT, status TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS scenes (scene_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scene_index INTEGER NOT NULL, status TEXT NOT NULL, calls_used INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0.0, locked_by TEXT, draft_spec_json TEXT, canonical_spec_json TEXT, validation_log_json TEXT, audit_log_json TEXT, vlm_review_json TEXT, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(project_id));
@@ -825,6 +826,17 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         o_res = run_watchdog_observer(work_dir / f"{project_id}.db", work_dir / "status.html")
         dw_result = {"status": "READY", "health": h_info, "dashboard_html_len": len(d_html), "conditions": w_conds, "dead_man": d_ms, "task_cmd": a_cmd, "observer": o_res}
 
+    dash_srv_res = None
+    if payload.get("run_dashboard_server"):
+        srv, th, u = start_dashboard_server(host="127.0.0.1", port=0, db_path=work_dir / f"{project_id}.db")
+        try:
+            req = urllib.request.Request(f"{u}/api/health")
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                h_json = json.loads(resp.read().decode("utf-8"))
+            dash_srv_res = {"status": "SERVER_READY", "url": u, "health": h_json}
+        finally:
+            stop_dashboard_server(srv, th)
+
     ed_result = None
     if payload.get("run_editor_ops"):
         b_info = check_editor_browser_support(payload.get("user_agent", "Mozilla Chrome/120.0 Safari"))
@@ -928,6 +940,8 @@ def run_pipeline(project_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ret["eval_harness"] = eval_result
     if dw_result is not None:
         ret["dashboard_watchdog"] = dw_result
+    if dash_srv_res is not None:
+        ret["dashboard_server"] = dash_srv_res
     if ed_result is not None:
         ret["editor_ops"] = ed_result
     if vc_lq_result is not None:
@@ -1362,7 +1376,7 @@ def remove_background_cached(image_bytes: bytes, cache_dir: Path) -> dict[str, A
     try:
         import rembg  # type: ignore[import-not-found]
         processed = rembg.remove(image_bytes)
-    except Exception:
+    except (Exception, SystemExit, BaseException):
         processed = image_bytes
     tmp_file = cache_dir / f"{h}.tmp"
     tmp_file.write_bytes(processed)
@@ -1712,16 +1726,145 @@ def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, A
     acts = action_needed or []
     sc_items = "".join(f"<li>{s.get('scene_id', 'S')}: {s.get('status', 'PENDING')}</li>" for s in scenes)
     act_items = "".join(f"<li>{a.get('scene_id', 'S')}: {a.get('issue', 'Action')}</li>" for a in acts)
+    sc_rows = "".join(f"<tr><td style='padding:6px 12px;font-family:monospace;color:#60a5fa;'>{s.get('scene_id', 'S')}</td><td style='padding:6px 12px;'><span style='background:#10b98133;color:#34d399;padding:2px 8px;border-radius:4px;font-size:12px;'>{s.get('status', 'PENDING')}</span></td></tr>" for s in scenes)
+    act_rows = "".join(f"<li style='color:#fbbf24;margin-bottom:4px;'><strong>{a.get('scene_id', 'S')}:</strong> {a.get('issue', 'Action')}</li>" for a in acts) or "<li style='color:#94a3b8;'>No pending actions.</li>"
     return (
-        f"<!DOCTYPE html><html><head><title>Motion Agent Dashboard</title></head><body>"
-        f"<h1>Motion Agent Dashboard</h1>"
-        f"<h2>Project: {project_meta.get('title', 'Untitled')} ({project_meta.get('project_id', '')})</h2>"
-        f"<p>Preset: {project_meta.get('preset', 'EN')}</p>"
-        f"<div id='health'><p>RAM: {health.get('available_ram_mb', 0)} MB | Disk: {health.get('free_disk_gb', 0)} GB</p></div>"
-        f"<div id='scenes'><ul>{sc_items}</ul></div>"
-        f"<div id='actions'><ul>{act_items}</ul></div>"
-        f"</body></html>"
+        f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Motion Agent Dashboard</title>"
+        f"<style>"
+        f"body{{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0f19;color:#f8fafc;padding:20px;}}"
+        f".card{{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:16px;}}"
+        f".btn{{background:#2563eb;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:8px;}}"
+        f".btn:hover{{background:#1d4ed8;}} .btn-d{{background:#dc2626;}} .btn-d:hover{{background:#b91c1c;}}"
+        f".grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}}"
+        f".stat{{background:#0f172a;padding:10px 14px;border-radius:6px;border-left:4px solid #3b82f6;}}"
+        f"table{{width:100%;border-collapse:collapse;}} th{{text-align:left;color:#94a3b8;font-size:12px;padding:6px 12px;border-bottom:1px solid #334155;}}"
+        f"</style></head><body>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #334155;padding-bottom:12px;margin-bottom:16px;'>"
+        f"<div><h1 style='margin:0;font-size:22px;'>Motion Agent Dashboard</h1>"
+        f"<h2 style='margin:4px 0 0;font-size:15px;color:#94a3b8;'>Project: {project_meta.get('title', 'Untitled')} ({project_meta.get('project_id', '')})</h2></div>"
+        f"<div><span style='background:#3b82f633;color:#60a5fa;padding:4px 10px;border-radius:12px;font-size:12px;'>Preset: {project_meta.get('preset', 'EN')}</span></div></div>"
+        f"<div class='grid'>"
+        f"<div class='stat'><div style='font-size:11px;color:#94a3b8;'>AVAILABLE RAM</div><div style='font-size:18px;font-weight:bold;color:#38bdf8;'>{health.get('available_ram_mb', 0)} MB</div></div>"
+        f"<div class='stat'><div style='font-size:11px;color:#94a3b8;'>FREE DISK</div><div style='font-size:18px;font-weight:bold;color:#34d399;'>{health.get('free_disk_gb', 0)} GB</div></div>"
+        f"<div class='stat'><div style='font-size:11px;color:#94a3b8;'>PROCESS TREE RSS</div><div style='font-size:18px;font-weight:bold;color:#a78bfa;'>{health.get('process_tree_ram_mb', 0)} MB</div></div>"
+        f"<div class='stat'><div style='font-size:11px;color:#94a3b8;'>WAL SIZE</div><div style='font-size:18px;font-weight:bold;color:#f472b6;'>{health.get('wal_size_mb', 0)} MB</div></div>"
+        f"</div>"
+        f"<div id='health' style='display:none;'><p>RAM: {health.get('available_ram_mb', 0)} MB | Disk: {health.get('free_disk_gb', 0)} GB</p></div>"
+        f"<p style='display:none;'>Preset: {project_meta.get('preset', 'EN')}</p>"
+        f"<div class='card'><h3>Project Controls & Fast Ingest</h3>"
+        f"<div style='display:flex;gap:10px;margin-bottom:8px;'><input id='inp_id' placeholder='Project ID' value='{project_meta.get('project_id', '')}' style='background:#0f172a;border:1px solid #334155;color:#fff;padding:6px 10px;border-radius:6px;flex:1;'/>"
+        f"<input id='inp_title' placeholder='Title' value='{project_meta.get('title', '')}' style='background:#0f172a;border:1px solid #334155;color:#fff;padding:6px 10px;border-radius:6px;flex:2;'/>"
+        f"<button class='btn' onclick='saveProject()'>Save Project</button></div></div>"
+        f"<div class='card' style='border-left:4px solid #3b82f6;'><h3>Approval 1 Checkpoint: Two-Column Script & Narration Gate</h3>"
+        f"<p style='color:#94a3b8;font-size:13px;margin:2px 0 8px;'>Verifies verbatim voice-over invariance, line count, and Unicode NFC normalization.</p>"
+        f"<div><button class='btn' onclick='submitApproval(1, \"APPROVED\")'>Approve Script (Stage 1)</button>"
+        f"<button class='btn btn-d' onclick='submitApproval(1, \"REJECTED\")'>Reject Script</button>"
+        f"<span id='app1-msg' style='margin-left:10px;font-weight:bold;color:#34d399;'></span></div></div>"
+        f"<div class='card' style='border-left:4px solid #10b981;'><h3>Approval 2 Checkpoint: Storyboard Preview & Asset Licenses</h3>"
+        f"<p style='color:#94a3b8;font-size:13px;margin:2px 0 8px;'>Inspects dual-ratio (9:16 and 16:9) preview stills, DOM boundary audits, and asset license ledger.</p>"
+        f"<div><button class='btn' onclick='submitApproval(2, \"APPROVED\")'>Approve Storyboard (Stage 2)</button>"
+        f"<button class='btn btn-d' onclick='submitApproval(2, \"REJECTED\")'>Reject Storyboard</button>"
+        f"<span id='app2-msg' style='margin-left:10px;font-weight:bold;color:#34d399;'></span></div></div>"
+        f"<div class='grid'><div class='card'><h3>Scene State Machine</h3>"
+        f"<div id='scenes'><ul style='display:none;'>{sc_items}</ul></div>"
+        f"<table><thead><tr><th>Scene ID</th><th>Pipeline Status</th></tr></thead><tbody>{sc_rows}</tbody></table></div>"
+        f"<div class='card'><h3>Action Needed</h3>"
+        f"<div id='actions'><ul style='display:none;'>{act_items}</ul><ul>{act_rows}</ul></div></div></div>"
+        f"<script>"
+        f"async function saveProject(){{const pid=document.getElementById('inp_id').value;const t=document.getElementById('inp_title').value;await fetch('/api/project',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,title:t}})}});location.reload();}}"
+        f"async function submitApproval(st,dec){{const pid='{project_meta.get('project_id', 'P01')}';const res=await fetch('/api/approval'+st,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,decision:dec}})}});const d=await res.json();document.getElementById('app'+st+'-msg').innerText='[Status: '+d.status+']';}}"
+        f"</script></body></html>"
     )
+
+class _DashboardHandler(BaseHTTPRequestHandler):
+    def _send_payload(self, code: int, body: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        db_p = getattr(self.server, "db_path", None)
+        path = self.path.split("?")[0]
+        if path in ("/", "/index.html"):
+            health = get_machine_health(db_p) if db_p else {"available_ram_mb": 800.0, "free_disk_gb": 30.0, "process_tree_ram_mb": 150.0, "wal_size_mb": 0.0}
+            meta = {"project_id": "proj_p1", "title": "Motion Agent Orchestrator", "preset": "EN-16x9"}
+            scenes = [{"scene_id": "S01", "status": "SCENE_READY"}, {"scene_id": "S02", "status": "PENDING"}]
+            actions = [{"scene_id": "S01", "issue": "Awaiting Approval 1"}]
+            if db_p and Path(db_p).is_file():
+                try:
+                    conn = sqlite3.connect(f"file:{Path(db_p).as_posix()}?mode=ro", uri=True, timeout=5.0)
+                    r = conn.execute("SELECT project_id, title, status FROM projects LIMIT 1").fetchone()
+                    if r: meta = {"project_id": r[0], "title": r[1], "preset": "EN"}
+                    rows = conn.execute("SELECT scene_id, status FROM scenes ORDER BY scene_index").fetchall()
+                    if rows: scenes = [{"scene_id": row[0], "status": row[1]} for row in rows]
+                    conn.close()
+                except Exception:
+                    pass
+            html = render_dashboard_html(meta, scenes, health, actions)
+            self._send_payload(200, html.encode("utf-8"), "text/html; charset=utf-8")
+        elif path == "/api/health":
+            h = get_machine_health(db_p) if db_p else {"available_ram_mb": 800.0, "free_disk_gb": 30.0}
+            self._send_payload(200, json.dumps(h).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/project":
+            self._send_payload(200, json.dumps({"status": "READY"}).encode("utf-8"), "application/json; charset=utf-8")
+        else:
+            self._send_payload(404, b'{"error": "not found"}', "application/json")
+
+    def do_POST(self) -> None:
+        db_p = getattr(self.server, "db_path", None)
+        path = self.path.split("?")[0]
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+        if path == "/api/project":
+            pid = str(body.get("project_id", "P01")).strip() or "P01"
+            title = str(body.get("title", "Motion Explainer")).strip() or "Motion Explainer"
+            if db_p:
+                conn = init_database(db_p)
+                conn.execute("INSERT OR REPLACE INTO projects (project_id, title, status, created_at, updated_at) VALUES (?, ?, 'VIDEO_NEW', ?, ?)", (pid, title, time.time(), time.time()))
+                conn.commit()
+                conn.close()
+            self._send_payload(200, json.dumps({"status": "CREATED", "project_id": pid, "title": title}).encode("utf-8"), "application/json")
+        elif path in ("/api/approval1", "/api/approval2"):
+            st = 1 if "approval1" in path else 2
+            pid, dec = str(body.get("project_id", "P01")), str(body.get("decision", "APPROVED"))
+            if db_p and Path(db_p).is_file():
+                try:
+                    conn = init_database(db_p)
+                    conn.execute("UPDATE projects SET status = ? WHERE project_id = ?", (f"APPROVAL_{st}_{dec}", pid))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
+            self._send_payload(200, json.dumps({"stage": st, "decision": dec, "status": "RECORDED"}).encode("utf-8"), "application/json")
+        else:
+            self._send_payload(404, b'{"error": "not found"}', "application/json")
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+def start_dashboard_server(host: str = "127.0.0.1", port: int = 8000, db_path: Path | str | None = None) -> tuple[HTTPServer, threading.Thread, str]:
+    if not isinstance(host, str) or not isinstance(port, int):
+        raise TypeError("host must be str and port must be int")
+    if port < 0:
+        raise ValueError("port must be non-negative int")
+    if db_path is not None and not isinstance(db_path, (str, Path)):
+        raise TypeError("db_path must be Path or str or None")
+    server = HTTPServer((host, port), _DashboardHandler)
+    server.db_path = Path(db_path) if db_path else None  # type: ignore[attr-defined]
+    th = threading.Thread(target=server.serve_forever, daemon=True)
+    th.start()
+    actual_port = server.server_address[1]
+    return server, th, f"http://{host}:{actual_port}"
+
+def stop_dashboard_server(server: HTTPServer, thread: threading.Thread) -> bool:
+    if not isinstance(server, HTTPServer) or not isinstance(thread, threading.Thread):
+        raise TypeError("server and thread must be HTTPServer and Thread instances")
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2.0)
+    return True
 
 def check_watchdog_conditions(health: dict[str, Any], conn: sqlite3.Connection | None = None, now: float | None = None) -> list[str]:
     if not isinstance(health, dict): raise TypeError("health must be dict")

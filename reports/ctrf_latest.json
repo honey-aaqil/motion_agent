@@ -4,556 +4,561 @@
       "name": "pytest-ctrf-builtin"
     },
     "summary": {
-      "tests": 108,
-      "passed": 108,
+      "tests": 109,
+      "passed": 109,
       "failed": 0,
       "skipped": 0,
       "pending": 0,
       "other": 0,
-      "start": 1793528016800,
-      "stop": 1793528036447,
+      "start": 1793612685098,
+      "stop": 1793612713393,
       "exit_code": 0
     },
     "tests": [
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_invalid_input_raises",
         "status": "passed",
-        "duration": 0.614
+        "duration": 1.11
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_pipeline_valid_and_durable_replace",
         "status": "passed",
-        "duration": 8.332
+        "duration": 12.004
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_failing_earlier_test_rejected",
         "status": "passed",
-        "duration": 3344.721
+        "duration": 4613.933
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_edited_protected_file_rejected",
         "status": "passed",
-        "duration": 2880.559
+        "duration": 3660.114
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_six_file_diff_rejected",
         "status": "passed",
-        "duration": 3228.388
+        "duration": 4120.994
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_uncalled_function_rejected",
         "status": "passed",
-        "duration": 3236.887
+        "duration": 4569.103
       },
       {
         "name": "tests/regression/test_f001_governance.py::test_sabotage_readonly_lock_blocks_edit",
         "status": "passed",
-        "duration": 2.599
+        "duration": 2.865
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_type_error",
         "status": "passed",
-        "duration": 0.409
+        "duration": 0.472
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_missing_keys",
         "status": "passed",
-        "duration": 0.332
+        "duration": 0.301
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_sqlite_too_old",
         "status": "passed",
-        "duration": 0.327
+        "duration": 0.342
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_valid_report",
         "status": "passed",
-        "duration": 0.141
+        "duration": 0.456
       },
       {
         "name": "tests/regression/test_f002_env.py::test_validate_environment_wired_in_run_pipeline",
         "status": "passed",
-        "duration": 2.986
+        "duration": 9.055
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_json_output",
         "status": "passed",
-        "duration": 2144.89
+        "duration": 2291.253
       },
       {
         "name": "tests/regression/test_f002_env.py::test_check_env_script_human_output_and_todo",
         "status": "passed",
-        "duration": 1787.558
+        "duration": 2228.728
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_audio_filename_validation",
         "status": "passed",
-        "duration": 0.767
+        "duration": 0.466
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_vo_text_normalization_and_split",
         "status": "passed",
-        "duration": 0.61
+        "duration": 0.329
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_duration_and_utf8_roundtrip",
         "status": "passed",
-        "duration": 18.536
+        "duration": 48.764
       },
       {
         "name": "tests/regression/test_f003_spikes.py::test_memory_and_pipeline_wiring",
         "status": "passed",
-        "duration": 28.05
+        "duration": 48.999
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_gemini_config_validation_and_rejections",
         "status": "passed",
-        "duration": 0.255
+        "duration": 0.224
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_backoff_jitter_and_rejections",
         "status": "passed",
-        "duration": 0.226
+        "duration": 0.185
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_gemini_status_classification_and_rejections",
         "status": "passed",
-        "duration": 0.21
+        "duration": 0.218
       },
       {
         "name": "tests/regression/test_f004_gemini.py::test_load_simulation_and_pipeline_wiring",
         "status": "passed",
-        "duration": 3.891
+        "duration": 7.477
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_init_database_and_schema_pragmas",
         "status": "passed",
-        "duration": 13.49
+        "duration": 69.283
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_scene_state_transitions_and_rejections",
         "status": "passed",
-        "duration": 16.414
+        "duration": 109.681
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_lease_lifecycle_and_reclaim",
         "status": "passed",
-        "duration": 15.398
+        "duration": 125.126
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_error_routing_and_rejections",
         "status": "passed",
-        "duration": 0.19
+        "duration": 0.218
       },
       {
         "name": "tests/regression/test_f005_state_machine.py::test_pipeline_wiring_state_machine",
         "status": "passed",
-        "duration": 17.851
+        "duration": 167.982
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_rate_governor_interval_and_daily_cap",
         "status": "passed",
-        "duration": 13.712
+        "duration": 81.88
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_gateway_queue_priority_and_idempotency",
         "status": "passed",
-        "duration": 17.721
+        "duration": 156.932
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_model_version_assertion_and_logging",
         "status": "passed",
-        "duration": 12.176
+        "duration": 100.334
       },
       {
         "name": "tests/regression/test_f006_rate_governor.py::test_pipeline_wiring_gateway",
         "status": "passed",
-        "duration": 17.973
+        "duration": 127.17
       },
       {
         "name": "tests/regression/test_f007_chaos_server.py::test_compute_llm_backoff",
         "status": "passed",
-        "duration": 0.202
+        "duration": 0.366
       },
       {
         "name": "tests/regression/test_f007_chaos_server.py::test_mock_gemini_server_and_gateway_modes",
         "status": "passed",
-        "duration": 903.002
+        "duration": 1065.253
       },
       {
         "name": "tests/regression/test_f007_chaos_server.py::test_full_state_machine_chaos_replay",
         "status": "passed",
-        "duration": 18.415
+        "duration": 241.184
       },
       {
         "name": "tests/regression/test_f007_chaos_server.py::test_pipeline_wiring_chaos",
         "status": "passed",
-        "duration": 510.992
+        "duration": 536.124
       },
       {
         "name": "tests/regression/test_f008_renderer.py::test_compute_render_chunks_and_rejections",
         "status": "passed",
-        "duration": 0.259
+        "duration": 0.266
       },
       {
         "name": "tests/regression/test_f008_renderer.py::test_chromium_flags_and_resource_watchdog",
         "status": "passed",
-        "duration": 0.609
+        "duration": 1.127
       },
       {
         "name": "tests/regression/test_f008_renderer.py::test_ffmpeg_commands_and_process_cleanup",
         "status": "passed",
-        "duration": 14.336
+        "duration": 20.514
       },
       {
         "name": "tests/regression/test_f008_renderer.py::test_render_scene_chunk_and_pipeline_wiring",
         "status": "passed",
-        "duration": 13.576
+        "duration": 21.222
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv1_streams_valid_and_sabotage",
         "status": "passed",
-        "duration": 0.275
+        "duration": 0.621
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv2_blackdetect_valid_and_sabotage",
         "status": "passed",
-        "duration": 0.215
+        "duration": 0.286
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv3_freezedetect_valid_and_sabotage",
         "status": "passed",
-        "duration": 0.172
+        "duration": 0.236
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv4_audio_loudness_valid_and_sabotage",
         "status": "passed",
-        "duration": 0.157
+        "duration": 0.222
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv5_framemd5_valid_and_sabotage",
         "status": "passed",
-        "duration": 0.14
+        "duration": 0.284
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_inv6_ledger_valid_and_sabotage",
         "status": "passed",
-        "duration": 1.907
+        "duration": 2.669
       },
       {
         "name": "tests/regression/test_f009_canaries.py::test_run_canary_gate_and_sabotage_suite",
         "status": "passed",
-        "duration": 3.703
+        "duration": 11.427
       },
       {
         "name": "tests/regression/test_f010_templates_and_gates.py::test_f010_invalid_inputs_and_catalog",
         "status": "passed",
-        "duration": 0.265
+        "duration": 0.518
       },
       {
         "name": "tests/regression/test_f010_templates_and_gates.py::test_f010_canonicalizer_and_validator",
         "status": "passed",
-        "duration": 0.71
+        "duration": 0.736
       },
       {
         "name": "tests/regression/test_f010_templates_and_gates.py::test_f010_dom_gate_and_pipeline",
         "status": "passed",
-        "duration": 3.015
+        "duration": 8.222
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 0.206
+        "duration": 0.524
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_sacred_vo_normalization_and_roundtrip",
         "status": "passed",
-        "duration": 0.177
+        "duration": 0.314
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_parse_appendix_a_fixture",
         "status": "passed",
-        "duration": 0.943
+        "duration": 1.232
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_uncertain_lines_raise_questions",
         "status": "passed",
-        "duration": 0.23
+        "duration": 0.267
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_audio_pack_generation_and_export",
         "status": "passed",
-        "duration": 5.903
+        "duration": 11.853
       },
       {
         "name": "tests/regression/test_f011_parser_audio_pack.py::test_pipeline_integration",
         "status": "passed",
-        "duration": 8.483
+        "duration": 21.846
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_license_filter_contracts_and_rules",
         "status": "passed",
-        "duration": 0.489
+        "duration": 0.509
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_action_needed_detection",
         "status": "passed",
-        "duration": 0.28
+        "duration": 0.339
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_asset_ledger_crud_and_export",
         "status": "passed",
-        "duration": 2.52
+        "duration": 6.572
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_credits_markdown_generation",
         "status": "passed",
-        "duration": 0.219
+        "duration": 0.321
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_background_removal_caching",
         "status": "passed",
-        "duration": 3.145
+        "duration": 5.001
       },
       {
         "name": "tests/regression/test_f012_assets_and_ledger.py::test_pipeline_wiring_assets_and_ledger",
         "status": "passed",
-        "duration": 9.863
+        "duration": 20.068
       },
       {
         "name": "tests/regression/test_f013_timing_and_anchors.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 0.733
+        "duration": 1.181
       },
       {
         "name": "tests/regression/test_f013_timing_and_anchors.py::test_validate_uploaded_audio_files",
         "status": "passed",
-        "duration": 0.165
+        "duration": 0.199
       },
       {
         "name": "tests/regression/test_f013_timing_and_anchors.py::test_timing_pads_and_sentence_anchors",
         "status": "passed",
-        "duration": 0.209
+        "duration": 0.253
       },
       {
         "name": "tests/regression/test_f013_timing_and_anchors.py::test_cues_multilingual_and_pipeline",
         "status": "passed",
-        "duration": 4.612
+        "duration": 11.184
       },
       {
         "name": "tests/regression/test_f014_story_bible_author.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 0.437
+        "duration": 0.923
       },
       {
         "name": "tests/regression/test_f014_story_bible_author.py::test_story_bible_and_exit_state",
         "status": "passed",
-        "duration": 0.157
+        "duration": 0.233
       },
       {
         "name": "tests/regression/test_f014_story_bible_author.py::test_scene_author_and_repair_restart_routing",
         "status": "passed",
-        "duration": 0.182
+        "duration": 0.283
       },
       {
         "name": "tests/regression/test_f014_story_bible_author.py::test_repair_retention_and_thinking_step_down",
         "status": "passed",
-        "duration": 0.176
+        "duration": 0.339
       },
       {
         "name": "tests/regression/test_f014_story_bible_author.py::test_record_scene_attempt_and_pipeline",
         "status": "passed",
-        "duration": 30.359
+        "duration": 170.989
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 0.583
+        "duration": 0.664
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_dataset_and_trials_sqlite",
         "status": "passed",
-        "duration": 13.134
+        "duration": 73.622
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_statistical_gates_and_bootstrap",
         "status": "passed",
-        "duration": 4.117
+        "duration": 4.044
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_local_visual_metrics_and_goodhart",
         "status": "passed",
-        "duration": 0.219
+        "duration": 0.22
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_judge_calibration_and_contact_sheet",
         "status": "passed",
-        "duration": 0.177
+        "duration": 0.18
       },
       {
         "name": "tests/regression/test_f015_eval_harness.py::test_pipeline_eval_wiring",
         "status": "passed",
-        "duration": 17.711
+        "duration": 80.29
       },
       {
         "name": "tests/regression/test_f016_dashboard_watchdog.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 0.221
+        "duration": 0.243
       },
       {
         "name": "tests/regression/test_f016_dashboard_watchdog.py::test_machine_health_and_dashboard_render",
         "status": "passed",
-        "duration": 14.535
+        "duration": 66.971
       },
       {
         "name": "tests/regression/test_f016_dashboard_watchdog.py::test_watchdog_conditions_and_throttling",
         "status": "passed",
-        "duration": 14.342
+        "duration": 74.455
       },
       {
         "name": "tests/regression/test_f016_dashboard_watchdog.py::test_dead_man_switch_and_autostart_cmd",
         "status": "passed",
-        "duration": 0.147
+        "duration": 0.139
       },
       {
         "name": "tests/regression/test_f016_dashboard_watchdog.py::test_watchdog_observer_and_pipeline",
         "status": "passed",
-        "duration": 39.895
+        "duration": 159.205
+      },
+      {
+        "name": "tests/regression/test_f016_dashboard_watchdog.py::test_dashboard_server_and_gui_endpoints",
+        "status": "passed",
+        "duration": 1204.259
       },
       {
         "name": "tests/regression/test_f017_editor_overrides.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 14.492
+        "duration": 67.232
       },
       {
         "name": "tests/regression/test_f017_editor_overrides.py::test_browser_support_and_slot_overrides",
         "status": "passed",
-        "duration": 0.191
+        "duration": 0.52
       },
       {
         "name": "tests/regression/test_f017_editor_overrides.py::test_asset_replacement_and_timeline",
         "status": "passed",
-        "duration": 0.198
+        "duration": 0.301
       },
       {
         "name": "tests/regression/test_f017_editor_overrides.py::test_regeneration_gates_and_cache_key",
         "status": "passed",
-        "duration": 0.253
+        "duration": 0.259
       },
       {
         "name": "tests/regression/test_f017_editor_overrides.py::test_editor_events_and_pipeline_integration",
         "status": "passed",
-        "duration": 33.386
+        "duration": 187.721
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_invalid_inputs_raise_explicit_errors",
         "status": "passed",
-        "duration": 13.204
+        "duration": 71.98
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_visual_critic_montage_and_prompt",
         "status": "passed",
-        "duration": 0.159
+        "duration": 0.18
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_visual_critic_parse_and_record",
         "status": "passed",
-        "duration": 13.311
+        "duration": 77.901
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_visual_critic_promotion_and_eligibility",
         "status": "passed",
-        "duration": 0.222
+        "duration": 0.152
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_low_quota_mode_and_golden_set",
         "status": "passed",
-        "duration": 0.325
+        "duration": 0.2
       },
       {
         "name": "tests/regression/test_f018_visual_critic_low_quota.py::test_run_pipeline_integration",
         "status": "passed",
-        "duration": 16.377
+        "duration": 83.931
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_invalid_inputs_raise_errors",
         "status": "passed",
-        "duration": 0.292
+        "duration": 0.281
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_build_cue_sheet_formats",
         "status": "passed",
-        "duration": 0.319
+        "duration": 0.156
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_generate_thumbnail_options",
         "status": "passed",
-        "duration": 0.176
+        "duration": 0.255
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_bundle_editable_project",
         "status": "passed",
-        "duration": 8.46
+        "duration": 8.305
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_assemble_final_package",
         "status": "passed",
-        "duration": 33.081
+        "duration": 30.997
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_simulate_chaos_soak_test",
         "status": "passed",
-        "duration": 0.233
+        "duration": 0.32
       },
       {
         "name": "tests/regression/test_f019_package_and_soak.py::test_f019_pipeline_wiring",
         "status": "passed",
-        "duration": 32.606
+        "duration": 48.929
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_audit_failure_pool_and_bad_input",
         "status": "passed",
-        "duration": 0.362
+        "duration": 4.311
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_manage_improvement_rule_workflow_and_bad_input",
         "status": "passed",
-        "duration": 0.373
+        "duration": 0.879
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_replay_rule_history_offline_and_bad_input",
         "status": "passed",
-        "duration": 0.401
+        "duration": 2.608
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_exemplar_bank_lifecycle_and_compatibility",
         "status": "passed",
-        "duration": 0.328
+        "duration": 1.657
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_retrieve_exemplars_ranking_and_bad_input",
         "status": "passed",
-        "duration": 0.409
+        "duration": 0.957
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_run_model_migration_checklist",
         "status": "passed",
-        "duration": 0.39
+        "duration": 0.921
       },
       {
         "name": "tests/regression/test_f020_improvement_program.py::test_pipeline_wiring_improvement_program",
         "status": "passed",
-        "duration": 3.108
+        "duration": 7.711
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_governance_files_present_and_bounded",
         "status": "passed",
-        "duration": 0.667
+        "duration": 4.04
       },
       {
         "name": "tests/immutable/test_immutable_sample.py::test_immutable_pipeline_rejects_bad_input",
         "status": "passed",
-        "duration": 4.238
+        "duration": 6.436
       }
     ]
   }
