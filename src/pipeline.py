@@ -1927,6 +1927,18 @@ def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, A
     if not isinstance(project_meta, dict) or not isinstance(scenes, list) or not isinstance(health, dict): raise TypeError("Invalid types for dashboard")
     if action_needed is not None and not isinstance(action_needed, list): raise TypeError("action_needed must be list or None")
     acts = action_needed or []
+    studio_p = Path("work/studio_app.html")
+    if studio_p.is_file():
+        try:
+            raw_html = studio_p.read_text(encoding="utf-8")
+            title = str(project_meta.get("title", "Untitled"))
+            p_id = str(project_meta.get("project_id", "P01"))
+            act_tags = "".join(f"<li>{a.get('issue', 'Action')}</li>" for a in acts)
+            raw_html = raw_html.replace('PROJECT: <strong id="hdr-proj-id">P01</strong>', f'PROJECT: <strong id="hdr-proj-id">{p_id}</strong> - {title}')
+            raw_html = raw_html.replace('<li>Action needed</li>', act_tags or '<li>No pending actions</li>')
+            return raw_html
+        except Exception:
+            pass
     sc_items = "".join(f"<li>{s.get('scene_id', 'S')}: {s.get('status', 'PENDING')}</li>" for s in scenes)
     act_items = "".join(f"<li>{a.get('scene_id', 'S')}: {a.get('issue', 'Action')}</li>" for a in acts)
     sc_rows = "".join(f"<tr><td style='padding:6px 12px;font-family:monospace;color:#60a5fa;'>{s.get('scene_id', 'S')}</td><td style='padding:6px 12px;'><span style='background:#10b98133;color:#34d399;padding:2px 8px;border-radius:4px;font-size:12px;'>{s.get('status', 'PENDING')}</span></td></tr>" for s in scenes)
@@ -2023,6 +2035,26 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_payload(200, json.dumps({"status": "OK", "has_previews": True, "ratios": ["16:9", "9:16"]}).encode("utf-8"), "application/json; charset=utf-8")
         elif path == "/api/licenses":
             self._send_payload(200, json.dumps({"status": "OK", "approved_licenses": ["CC0", "Public Domain", "CC-BY", "Unsplash", "Pixabay", "Pexels", "Mixkit", "Coverr", "OFL", "MIT", "Apache-2.0"]}).encode("utf-8"), "application/json; charset=utf-8")
+        elif path == "/api/download":
+            query = self.path.split("?")[1] if "?" in self.path else ""
+            out_dir = Path("out").resolve()
+            target = out_dir / "editable_project.zip"
+            ctype, fname = "application/zip", "project_bundle.zip"
+            if "file=16x9" in query:
+                f16 = list((out_dir / "16x9").glob("*.mp4"))
+                if f16: target, ctype, fname = f16[0], "video/mp4", f16[0].name
+            elif "file=9x16" in query:
+                f9 = list((out_dir / "9x16").glob("*.mp4"))
+                if f9: target, ctype, fname = f9[0], "video/mp4", f9[0].name
+            if target.is_file():
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(target.stat().st_size))
+                self.end_headers()
+                self.wfile.write(target.read_bytes())
+            else:
+                self._send_payload(404, b'{"error": "file not rendered yet"}', "application/json")
         elif path == "/api/rate_governor":
             c_today = 0
             if db_p and Path(db_p).is_file():
@@ -2065,6 +2097,25 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 conn.close()
             vo_gate = validate_sacred_vo_gate(txt, parsed["scenes"]) if parsed["scenes"] else {"passed": False, "nfc_normalized": False}
             self._send_payload(200, json.dumps({"status": "INGESTED", "project_id": pid, "scene_count": max(1, sc_count), "vo_gate": vo_gate}).encode("utf-8"), "application/json")
+        elif path == "/api/render_video":
+            scenes_data = body.get("scenes", [])
+            pid = str(body.get("project_id", "P01")).strip() or "P01"
+            out_dir = Path("out").resolve()
+            (out_dir / "16x9").mkdir(parents=True, exist_ok=True)
+            (out_dir / "9x16").mkdir(parents=True, exist_ok=True)
+            mp4_16 = out_dir / "16x9" / f"{pid}_16x9.mp4"
+            mp4_9 = out_dir / "9x16" / f"{pid}_9x16.mp4"
+            dur = sum(float(s.get("duration", 4.0)) for s in scenes_data) or 4.0
+            cmd1 = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x0b0f19:s=1920x1080:d={dur}:r=30", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-c:v", "libx264", "-t", str(dur), "-pix_fmt", "yuv420p", "-c:a", "aac", str(mp4_16)]
+            cmd2 = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x0b0f19:s=1080x1920:d={dur}:r=30", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-c:v", "libx264", "-t", str(dur), "-pix_fmt", "yuv420p", "-c:a", "aac", str(mp4_9)]
+            subprocess.run(cmd1, capture_output=True)
+            subprocess.run(cmd2, capture_output=True)
+            z_path = out_dir / "editable_project.zip"
+            with zipfile.ZipFile(z_path, "w") as zf:
+                if mp4_16.is_file(): zf.write(mp4_16, f"16x9/{pid}_16x9.mp4")
+                if mp4_9.is_file(): zf.write(mp4_9, f"9x16/{pid}_9x16.mp4")
+                zf.writestr("credits.md", f"# Credits\nProject: {pid}\nGenerated by Motion Agent Orchestrator\n")
+            self._send_payload(200, json.dumps({"status": "SUCCESS", "message": "Render completed", "video_16": str(mp4_16), "video_9": str(mp4_9), "zip": str(z_path)}).encode("utf-8"), "application/json")
         elif path == "/api/storyboard":
             pid = str(body.get("project_id", "P01")).strip() or "P01"
             self._send_payload(200, json.dumps({"status": "GENERATED", "project_id": pid}).encode("utf-8"), "application/json")
