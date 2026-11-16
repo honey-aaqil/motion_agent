@@ -1,0 +1,31 @@
+[project]
+name = "motion-studio-v2"
+version = "2.0.0"
+description = "Higgsfield-style AI director workflow with deterministic Chromium + FFmpeg rendering"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=3.3.0",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.3",
+    "playwright>=1.65.0",
+    "pillow>=11.0.0",
+    "psutil>=6.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "BLE", "S", "TID"]
+ignore = ["S101"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"google.generativeai".msg = "google-generativeai is EOL; use 'from google import genai' (google-genai>=3.3.0)."
+"vertexai.generative_models".msg = "vertexai.generative_models was removed; use 'genai.Client(vertexai=True)'."
