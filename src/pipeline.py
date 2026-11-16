@@ -1927,7 +1927,7 @@ def render_dashboard_html(project_meta: dict[str, Any], scenes: list[dict[str, A
     if not isinstance(project_meta, dict) or not isinstance(scenes, list) or not isinstance(health, dict): raise TypeError("Invalid types for dashboard")
     if action_needed is not None and not isinstance(action_needed, list): raise TypeError("action_needed must be list or None")
     acts = action_needed or []
-    studio_p = Path("work/studio_app.html")
+    studio_p = Path(__file__).parent / "studio_app.html" if (Path(__file__).parent / "studio_app.html").is_file() else Path("work/studio_app.html")
     if studio_p.is_file():
         try:
             raw_html = studio_p.read_text(encoding="utf-8")
