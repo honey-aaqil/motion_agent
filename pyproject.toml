@@ -1,7 +1,7 @@
 [project]
 name = "motion-studio-v2"
-version = "2.0.0"
-description = "Higgsfield-style AI director workflow with deterministic Chromium + FFmpeg rendering"
+version = "2.1.0"
+description = "Universal Generative AI Video Director & Deterministic Code-to-Video Engine"
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=3.3.0",
@@ -10,6 +10,8 @@ dependencies = [
     "playwright>=1.65.0",
     "pillow>=11.0.0",
     "psutil>=6.1.0",
+    "fastapi>=0.118.0",
+    "uvicorn>=0.36.0",
 ]
 
 [dependency-groups]
