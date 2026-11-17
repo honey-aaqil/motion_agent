@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src data:;"
+  />
+  <title>Motion Studio v2 — Parametric Visual Host</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #05070d;
+      color: #f8fafc;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+    #camera-rig {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      transform-style: preserve-3d;
+    }
+    #camera-plane {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+      will-change: transform, filter;
+    }
+    #scene-canvas {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    #editor-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+    }
+    body.interactive #editor-overlay {
+      display: block;
+    }
+    #selection-box {
+      position: absolute;
+      border: 2px solid #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+      box-shadow: 0 0 0 1px rgba(2, 6, 23, 0.8), 0 0 18px rgba(56, 189, 248, 0.45);
+      border-radius: 6px;
+      display: none;
+      pointer-events: none;
+    }
+    #selection-tag {
+      position: absolute;
+      top: -24px;
+      left: -2px;
+      background: #0284c7;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+  </style>
+  <style id="ai-custom-css"></style>
+</head>
+<body>
+  <div id="camera-rig">
+    <div id="camera-plane">
+      <div id="scene-canvas"></div>
+    </div>
+  </div>
+
+  <div id="editor-overlay">
+    <div id="selection-box"><span id="selection-tag"></span></div>
+  </div>
+
+  <script src="./camera.js"></script>
+  <script>
+    window.ready = false;
+    window.lastRuntimeError = null;
+
+    let ACTIVE_SHOT = null;
+    let ACTIVE_PROPS = {};
+    let COMPILED_SEEK = null;
+    let CURRENT_TIME = 0;
+    let SELECTED_NODE_ID = null;
+    let CANVAS_HITBOXES = new Map();
+
+    function createSeededRng(seed) {
+      let a = (seed >>> 0) || 2026;
+      return function rng() {
+        a |= 0;
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function registerHitbox(nodeId, x, y, width, height) {
+      if (!nodeId) return;
+      CANVAS_HITBOXES.set(String(nodeId), {
+        left: Number(x),
+        top: Number(y),
+        width: Number(width),
+        height: Number(height),
+        right: Number(x) + Number(width),
+        bottom: Number(y) + Number(height),
+      });
+    }
+
+    function getNodeRect(nodeId) {
+      if (!nodeId) return null;
+      const domNode = document.querySelector(`[data-node="${CSS.escape(nodeId)}"]`);
+      if (domNode) {
+        const r = domNode.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          return { left: r.left, top: r.top, width: r.width, height: r.height };
+        }
+      }
+      const hb = CANVAS_HITBOXES.get(nodeId);
+      if (hb && hb.width > 0 && hb.height > 0) {
+        return { left: hb.left, top: hb.top, width: hb.width, height: hb.height };
+      }
+      return null;
+    }
+
+    function updateSelectionOverlay() {
+      const box = document.getElementById("selection-box");
+      const tag = document.getElementById("selection-tag");
+      if (!document.body.classList.contains("interactive") || !SELECTED_NODE_ID) {
+        box.style.display = "none";
+        return;
+      }
+      const rect = getNodeRect(SELECTED_NODE_ID);
+      if (!rect) {
+        box.style.display = "none";
+        return;
+      }
+      box.style.display = "block";
+      box.style.left = `${rect.left}px`;
+      box.style.top = `${rect.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+      tag.textContent = SELECTED_NODE_ID;
+    }
+
+    window.setInteractiveMode = function setInteractiveMode(enabled) {
+      document.body.classList.toggle("interactive", Boolean(enabled));
+      updateSelectionOverlay();
+    };
+
+    window.selectNode = function selectNode(nodeId) {
+      SELECTED_NODE_ID = nodeId || null;
+      updateSelectionOverlay();
+    };
+
+    window.updateProps = function updateProps(nextProps) {
+      ACTIVE_PROPS = Object.assign({}, ACTIVE_PROPS, nextProps || {});
+      if (ACTIVE_SHOT) {
+        window.seek(CURRENT_TIME, ACTIVE_SHOT.duration || 3.0);
+      }
+    };
+
+    window.updateCamera = function updateCamera(nextCamera) {
+      if (!ACTIVE_SHOT) return;
+      ACTIVE_SHOT.camera = Object.assign({}, ACTIVE_SHOT.camera || {}, nextCamera || {});
+      window.seek(CURRENT_TIME, ACTIVE_SHOT.duration || 3.0);
+    };
+
+    window.mountParametricShot = async function mountParametricShot(shot, resolvedProps) {
+      window.ready = false;
+      window.lastRuntimeError = null;
+      ACTIVE_SHOT = shot;
+      ACTIVE_PROPS = Object.assign({}, resolvedProps || {});
+      CANVAS_HITBOXES.clear();
+
+      const isPortrait = window.innerHeight > window.innerWidth;
+      document.body.classList.toggle("portrait", isPortrait);
+      document.body.classList.toggle("landscape", !isPortrait);
+
+      document.getElementById("ai-custom-css").textContent = shot.css_styles || "";
+      document.getElementById("scene-canvas").innerHTML = shot.html_markup || "";
+
+      try {
+        COMPILED_SEEK = new Function(
+          "t",
+          "duration",
+          "progress",
+          "props",
+          "rng",
+          "isPortrait",
+          "registerHitbox",
+          shot.seek_js_body
+        );
+      } catch (err) {
+        window.lastRuntimeError = `CompileError: ${err && err.message ? err.message : String(err)}`;
+        throw err;
+      }
+
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+
+      window.seek(0, shot.duration || 3.0);
+      window.ready = true;
+    };
+
+    window.seek = function seek(t, duration) {
+      if (!ACTIVE_SHOT || !COMPILED_SEEK) return;
+      const dur = Math.max(0.001, Number(duration || ACTIVE_SHOT.duration || 3.0));
+      const ts = Math.max(0, Math.min(dur, Number(t)));
+      CURRENT_TIME = ts;
+      const progress = Math.max(0, Math.min(1, ts / dur));
+      const isPortrait = window.innerHeight > window.innerWidth;
+
+      if (typeof window.computeCameraFrame === "function") {
+        const cam = window.computeCameraFrame(
+          ACTIVE_SHOT.camera || {},
+          progress,
+          window.innerWidth || 1920,
+          ACTIVE_SHOT.seed || 2026
+        );
+        const rig = document.getElementById("camera-rig");
+        const plane = document.getElementById("camera-plane");
+        rig.style.perspective = `${cam.perspectivePx}px`;
+        const fg = cam.layers && cam.layers.fg ? cam.layers.fg : null;
+        if (fg) {
+          plane.style.transform = fg.transform;
+          plane.style.filter = fg.blurPx > 0.05 ? `blur(${fg.blurPx}px)` : "none";
+        }
+      }
+
+      CANVAS_HITBOXES.clear();
+      const rng = createSeededRng((ACTIVE_SHOT.seed || 2026) + Math.round(ts * 1000));
+      try {
+        COMPILED_SEEK(ts, dur, progress, ACTIVE_PROPS, rng, isPortrait, registerHitbox);
+      } catch (err) {
+        window.lastRuntimeError = `SeekRuntimeError @ t=${ts.toFixed(3)}s: ${
+          err && err.message ? err.message : String(err)
+        }`;
+        throw err;
+      }
+      updateSelectionOverlay();
+    };
+
+    window.inspectScene = function inspectScene() {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const root = document.getElementById("scene-canvas");
+      const textElements = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      let node = walker.nextNode();
+      while (node) {
+        const directText = Array.from(node.childNodes)
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent.trim())
+          .join(" ")
+          .trim();
+        if (directText.length > 0) {
+          const r = node.getBoundingClientRect();
+          const cs = window.getComputedStyle(node);
+          if (r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none") {
+            textElements.push({
+              tag: node.tagName.toLowerCase(),
+              nodeId: node.dataset ? node.dataset.node || "" : "",
+              text: directText.slice(0, 80),
+              left: r.left,
+              top: r.top,
+              right: r.right,
+              bottom: r.bottom,
+            });
+          }
+        }
+        node = walker.nextNode();
+      }
+      return {
+        viewport: { width: vw, height: vh },
+        childElementCount: root.querySelectorAll("*").length,
+        hitboxCount: CANVAS_HITBOXES.size,
+        textElements,
+        lastRuntimeError: window.lastRuntimeError,
+      };
+    };
+
+    // Interactive click-and-drag direct manipulation for Studio UI
+    let dragState = null;
+
+    function hitTest(clientX, clientY) {
+      const el = document.elementFromPoint(clientX, clientY);
+      const tagged = el ? el.closest("[data-node]") : null;
+      if (tagged && tagged.dataset.node) {
+        return tagged.dataset.node;
+      }
+      for (const [nodeId, rect] of Array.from(CANVAS_HITBOXES.entries()).reverse()) {
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          return nodeId;
+        }
+      }
+      return null;
+    }
+
+    window.addEventListener("pointerdown", (ev) => {
+      if (!document.body.classList.contains("interactive")) return;
+      const hitNode = hitTest(ev.clientX, ev.clientY);
+      SELECTED_NODE_ID = hitNode;
+      updateSelectionOverlay();
+      window.parent.postMessage({ type: "NODE_SELECTED", nodeId: hitNode }, "*");
+      if (hitNode) {
+        dragState = { nodeId: hitNode, lastX: ev.clientX, lastY: ev.clientY };
+      }
+    });
+
+    window.addEventListener("pointermove", (ev) => {
+      if (!dragState) return;
+      const dxPct = ((ev.clientX - dragState.lastX) / Math.max(1, window.innerWidth)) * 100;
+      const dyPct = ((ev.clientY - dragState.lastY) / Math.max(1, window.innerHeight)) * 100;
+      dragState.lastX = ev.clientX;
+      dragState.lastY = ev.clientY;
+      window.parent.postMessage(
+        {
+          type: "NODE_DRAGGED",
+          nodeId: dragState.nodeId,
+          dxPct: Number(dxPct.toFixed(2)),
+          dyPct: Number(dyPct.toFixed(2)),
+        },
+        "*"
+      );
+    });
+
+    window.addEventListener("pointerup", () => {
+      dragState = null;
+    });
+  </script>
+</body>
+</html>
